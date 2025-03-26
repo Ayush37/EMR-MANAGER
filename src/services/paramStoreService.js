@@ -1,6 +1,5 @@
 // src/services/paramStoreService.js
-import { GetParametersByPathCommand } from "@aws-sdk/client-ssm";
-import { ssmClient } from "./awsConfig";
+import { ssmClient } from './awsConfig';
 
 const PARAM_PATH = "/application/ecdp-config/UAT/EMR-BASE/";
 
@@ -25,7 +24,8 @@ export const fetchClusterConfigs = async () => {
         params.NextToken = nextToken;
       }
       
-      const response = await ssmClient.send(new GetParametersByPathCommand(params));
+      // Using the promise version of getParametersByPath
+      const response = await ssmClient.getParametersByPath(params).promise();
       allParams = [...allParams, ...response.Parameters];
       nextToken = response.NextToken;
     } while (nextToken);

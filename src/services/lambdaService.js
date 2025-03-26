@@ -1,6 +1,5 @@
 // src/services/lambdaService.js
-import { InvokeCommand } from "@aws-sdk/client-lambda";
-import { lambdaClient } from "./awsConfig";
+import { lambdaClient } from './awsConfig';
 
 const LAMBDA_FUNCTION_NAME = "app-job-submit";
 
@@ -29,7 +28,7 @@ export const terminateCluster = async (clusterName) => {
       Payload: JSON.stringify(payload),
     };
 
-    const response = await lambdaClient.send(new InvokeCommand(params));
+    const response = await lambdaClient.invoke(params).promise();
     
     // Parse the Lambda response
     const responsePayload = Buffer.from(response.Payload).toString();
@@ -64,7 +63,7 @@ export const createCluster = async (clusterName) => {
       Payload: JSON.stringify(payload),
     };
 
-    const response = await lambdaClient.send(new InvokeCommand(params));
+    const response = await lambdaClient.invoke(params).promise();
     
     // Parse the Lambda response
     const responsePayload = Buffer.from(response.Payload).toString();

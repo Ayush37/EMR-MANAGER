@@ -1,71 +1,63 @@
-// src/services/emrService.js
-import { 
-  ListClustersCommand,
-  DescribeClusterCommand
-} from "@aws-sdk/client-emr";
-import { emrClient } from "./awsConfig";
+// src/services/paramStoreService.js
+import { ssmClient } from './awsConfig';
+
+const PARAM_PATH = "/application/ecdp-config/UAT/EMR-BASE/";
 
 /**
- * Fetches the current state of all EMR clusters
- * @returns {Promise<Array>} List of EMR clusters with their current state
+ * Fetches all EMR cluster configurations from Parameter Store
+ * @returns {Promise<Array>} List of cluster configurations
  */
-export const listClusters = async () => {
-  try {
-    // List all clusters in various states
-    const states = ["STARTING", "BOOTSTRAPPING", "RUNNING", "WAITING", "TERMINATING", "TERMINATED", "TERMINATED_WITH_ERRORS"];
-    const params = {
-      ClusterStates: states,
-    };
-
-    const response = await emrClient.send(new ListClustersCommand(params));
-    return response.Clusters || [];
-  } catch (error) {
-    console.error("Error listing EMR clusters:", error);
-    throw error;
-  }
-};
-
-/**
- * Gets detailed information for a specific cluster
- * @param {string} clusterId EMR cluster ID
- * @returns {Promise<Object>} Detailed cluster information
- */
-export const getClusterDetails = async (clusterId) => {
+export const fetchClusterConfigs = async () => {
   try {
     const params = {
-      ClusterId: clusterId,
+      Path: PARAM_PATH,
+      Recursive: true,
+      WithDecryption: true,
     };
 
-    const response = await emrClient.send(new DescribeClusterCommand(params));
-    return response.Cluster;
+    // Parameter Store might return paginated results
+    let allParams = [];
+    let nextToken = null;
+
+    do {
+      if (nextToken) {
+        params.NextToken = nextToken;
+      }
+      
+      // Using the promise version of getParametersByPath
+      const response = await ssmClient.getParametersByPath(params).promise();
+      allParams = [...allParams, ...response.Parameters];
+      nextToken = response.NextToken;
+    } while (nextToken);
+
+    // Process parameters into cluster configs
+    return allParams
+      .filter(param => {
+        // Extract cluster name from the parameter name
+        const clusterName = param.Name.replace(PARAM_PATH, "");
+        // Filter out clusters with "STRESS" in their name
+        return !clusterName.includes("STRESS");
+      })
+      .map(param => {
+        const clusterName = param.Name.replace(PARAM_PATH, "");
+        let config;
+        
+        try {
+          // Parameter Store often stores JSON configurations
+          config = JSON.parse(param.Value);
+        } catch (e) {
+          config = { rawValue: param.Value };
+        }
+        
+        return {
+          name: clusterName,
+          config,
+          parameterName: param.Name,
+          lastModified: param.LastModifiedDate,
+        };
+      });
   } catch (error) {
-    console.error(`Error getting details for cluster ${clusterId}:`, error);
+    console.error("Error fetching cluster configurations:", error);
     throw error;
   }
-};
-
-/**
- * Maps cluster name to its state by finding the corresponding clusterID
- * @param {Array} clusterConfigs Configurations from Parameter Store
- * @param {Array} emrClusters List of actual EMR clusters from EMR API
- * @returns {Array} Merged information with cluster states
- */
-export const mapClusterStates = (clusterConfigs, emrClusters) => {
-  return clusterConfigs.map(config => {
-    // Find matching EMR cluster by name
-    const matchingCluster = emrClusters.find(cluster => 
-      cluster.Name === config.name || 
-      cluster.Name.includes(config.name)
-    );
-
-    return {
-      ...config,
-      state: matchingCluster ? matchingCluster.Status.State : "TERMINATED",
-      clusterId: matchingCluster ? matchingCluster.Id : null,
-      lastStateChangeReason: matchingCluster?.Status?.StateChangeReason || null,
-      timeline: matchingCluster?.Status?.Timeline || null,
-      applications: matchingCluster?.Applications || [],
-      tags: matchingCluster?.Tags || []
-    };
-  });
 };

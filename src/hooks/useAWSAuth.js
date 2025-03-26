@@ -1,6 +1,6 @@
 // src/hooks/useAWSAuth.js
 import { useState, useEffect } from 'react';
-import { fromIni } from '@aws-sdk/credential-provider-ini';
+import AWS from 'aws-sdk';
 
 /**
  * Custom hook for managing AWS authentication
@@ -21,16 +21,26 @@ const useAWSAuth = () => {
       setError(null);
       
       // Attempt to get credentials from local AWS CLI config
-      const credProvider = fromIni();
-      const creds = await credProvider();
+      AWS.config.credentials = new AWS.SharedIniFileCredentials();
       
-      setCredentials(creds);
-      setIsAuthenticated(true);
+      // Test the credentials by trying to refresh them
+      AWS.config.credentials.refresh((err) => {
+        if (err) {
+          console.error('Error refreshing AWS credentials:', err);
+          setError('Failed to load AWS credentials. Please ensure AWS CLI is configured.');
+          setIsAuthenticated(false);
+          setIsLoading(false);
+          return;
+        }
+        
+        setCredentials(AWS.config.credentials);
+        setIsAuthenticated(true);
+        setIsLoading(false);
+      });
     } catch (err) {
       console.error('Error loading AWS credentials:', err);
       setError('Failed to load AWS credentials. Please ensure AWS CLI is configured.');
       setIsAuthenticated(false);
-    } finally {
       setIsLoading(false);
     }
   };

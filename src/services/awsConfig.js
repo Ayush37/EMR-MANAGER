@@ -1,41 +1,32 @@
 // src/services/awsConfig.js
-import { SSMClient } from "@aws-sdk/client-ssm";
-import { EMRClient } from "@aws-sdk/client-emr";
-import { LambdaClient } from "@aws-sdk/client-lambda";
-import { fromIni } from "@aws-sdk/credential-provider-ini";
+import AWS from 'aws-sdk';
 
-// Load credentials from local AWS CLI config
-const credentialProvider = fromIni();
+// Configure AWS SDK to use local credentials
+AWS.config.credentials = new AWS.SharedIniFileCredentials();
+
+// Default region, can be configured based on requirements
+AWS.config.update({ region: 'us-east-1' });
 
 // Create service clients
-export const ssmClient = new SSMClient({
-  credentials: credentialProvider,
-  region: "us-east-1", // Default region, can be configured based on requirements
-});
-
-export const emrClient = new EMRClient({
-  credentials: credentialProvider,
-  region: "us-east-1",
-});
-
-export const lambdaClient = new LambdaClient({
-  credentials: credentialProvider,
-  region: "us-east-1",
-});
+export const ssmClient = new AWS.SSM();
+export const emrClient = new AWS.EMR();
+export const lambdaClient = new AWS.Lambda();
 
 // Helper to refresh credentials if needed
 export const refreshCredentials = async () => {
   try {
-    const newCredentials = await credentialProvider();
-    
-    // Update clients with new credentials
-    ssmClient.config.credentials = newCredentials;
-    emrClient.config.credentials = newCredentials;
-    lambdaClient.config.credentials = newCredentials;
-    
+    AWS.config.credentials.refresh((err) => {
+      if (err) {
+        console.error('Failed to refresh AWS credentials:', err);
+        return false;
+      }
+    });
     return true;
   } catch (error) {
-    console.error("Failed to refresh AWS credentials:", error);
+    console.error('Error refreshing AWS credentials:', error);
     return false;
   }
 };
+
+// Export the AWS SDK for any additional services needed
+export default AWS;
