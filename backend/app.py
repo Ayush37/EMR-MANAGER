@@ -23,18 +23,17 @@ ssm = session.client('ssm')
 emr = session.client('emr')
 lambda_client = session.client('lambda')
 
-# Constants - UPDATED FOR SPECIFIC CLUSTER
+# Constants
 PARAM_STORE_PATH = "/application/ecdp-config/uat1/EMR-BASE/"
-TARGET_CLUSTER = "ECDP-CLUSTER"
 LAMBDA_FUNCTION_NAME = "app-job-submit"
 
 @app.route('/clusters', methods=['GET'])
 def get_clusters():
-    """Fetch only the specific cluster from Parameter Store and its current state"""
+    """Fetch all clusters from Parameter Store and their current states"""
     try:
         logger.debug("Fetching clusters data")
         
-        # Get cluster configuration from Parameter Store (restricted to specific cluster)
+        # Get cluster configurations from Parameter Store
         cluster_configs = get_cluster_configs()
         logger.debug(f"Retrieved {len(cluster_configs)} cluster configs")
         
@@ -56,13 +55,8 @@ def get_cluster(name):
     """Get details for a specific cluster"""
     try:
         logger.debug(f"Fetching details for cluster: {name}")
-        
-        # Only allow the target cluster
-        if name != TARGET_CLUSTER:
-            logger.warning(f"Request for unauthorized cluster: {name}")
-            return jsonify({"error": f"Cluster {name} not found or access denied"}), 404
             
-        # Get cluster configuration
+        # Get cluster configurations
         cluster_configs = get_cluster_configs()
         emr_clusters = list_emr_clusters()
         merged_clusters = map_cluster_states(cluster_configs, emr_clusters)
@@ -84,11 +78,6 @@ def start_cluster(name):
     """Start a specific EMR cluster"""
     try:
         logger.debug(f"Request to start cluster: {name}")
-        
-        # Only allow the target cluster
-        if name != TARGET_CLUSTER:
-            logger.warning(f"Request to start unauthorized cluster: {name}")
-            return jsonify({"error": f"Cluster {name} not found or access denied"}), 404
             
         payload = {
             "resource": "/executions/clusters",
@@ -121,11 +110,6 @@ def terminate_cluster(name):
     """Terminate a specific EMR cluster"""
     try:
         logger.debug(f"Request to terminate cluster: {name}")
-        
-        # Only allow the target cluster
-        if name != TARGET_CLUSTER:
-            logger.warning(f"Request to terminate unauthorized cluster: {name}")
-            return jsonify({"error": f"Cluster {name} not found or access denied"}), 404
             
         payload = {
             "resource": "/executions/clusters",
@@ -156,54 +140,72 @@ def terminate_cluster(name):
 
 # Helper functions
 def get_cluster_configs():
-    """Fetches the specific EMR cluster configuration from Parameter Store"""
-    logger.debug(f"Fetching cluster config from Parameter Store at path: {PARAM_STORE_PATH}")
+    """Fetches all EMR cluster configurations from Parameter Store"""
+    logger.debug(f"Fetching cluster configs from Parameter Store at path: {PARAM_STORE_PATH}")
     
+    params = []
+    next_token = None
+
     try:
-        # Get the specific parameter for our target cluster
-        param_name = f"{PARAM_STORE_PATH}{TARGET_CLUSTER}"
-        logger.debug(f"Looking for parameter: {param_name}")
-        
-        response = ssm.get_parameter(
-            Name=param_name,
-            WithDecryption=True
-        )
-        
-        logger.debug(f"Parameter found: {param_name}")
-        param = response['Parameter']
-        
-        # Process the parameter into cluster config
-        try:
-            config = json.loads(param['Value'])
-            logger.debug("Successfully parsed JSON configuration")
-        except json.JSONDecodeError:
-            logger.warning("Could not parse parameter value as JSON")
-            config = {"rawValue": param['Value']}
+        while True:
+            kwargs = {
+                'Path': PARAM_STORE_PATH,
+                'Recursive': True,
+                'WithDecryption': True
+            }
+            if next_token:
+                kwargs['NextToken'] = next_token
 
-        # Convert datetime objects to ISO format strings for JSON serialization
-        last_modified = param.get('LastModifiedDate')
-        if hasattr(last_modified, 'isoformat'):
-            last_modified = last_modified.isoformat()
+            logger.debug(f"Calling get_parameters_by_path with: {kwargs}")
+            response = ssm.get_parameters_by_path(**kwargs)
+            
+            parameters = response.get('Parameters', [])
+            logger.debug(f"Received {len(parameters)} parameters")
+            
+            # Log each parameter name
+            for param in parameters:
+                logger.debug(f"Parameter found: {param['Name']}")
+                
+            params.extend(parameters)
 
-        cluster_config = {
-            "name": TARGET_CLUSTER,
-            "config": config,
-            "parameterName": param['Name'],
-            "lastModified": last_modified
-        }
-        
-        logger.debug(f"Processed cluster configuration: {TARGET_CLUSTER}")
-        return [cluster_config]
-        
-    except ssm.exceptions.ParameterNotFound:
-        logger.error(f"Parameter not found: {PARAM_STORE_PATH}{TARGET_CLUSTER}")
-        return []
+            next_token = response.get('NextToken')
+            if not next_token:
+                break
+
+        # Process parameters into cluster configs
+        cluster_configs = []
+        for param in params:
+            cluster_name = param['Name'].replace(PARAM_STORE_PATH, "")
+            # Filter out clusters with "STRESS" in their name
+            if "STRESS" not in cluster_name:
+                try:
+                    config = json.loads(param['Value'])
+                    logger.debug(f"Successfully parsed JSON for: {cluster_name}")
+                except json.JSONDecodeError:
+                    logger.warning(f"Could not parse parameter value as JSON for: {cluster_name}")
+                    config = {"rawValue": param['Value']}
+
+                # Convert datetime objects to ISO format strings for JSON serialization
+                last_modified = param.get('LastModifiedDate')
+                if hasattr(last_modified, 'isoformat'):
+                    last_modified = last_modified.isoformat()
+
+                cluster_configs.append({
+                    "name": cluster_name,
+                    "config": config,
+                    "parameterName": param['Name'],
+                    "lastModified": last_modified
+                })
+                logger.debug(f"Added cluster config: {cluster_name}")
+
+        logger.debug(f"Processed {len(cluster_configs)} cluster configurations")
+        return cluster_configs
     except Exception as e:
         logger.error(f"Error fetching cluster configs: {str(e)}", exc_info=True)
         return []
 
 def list_emr_clusters():
-    """Fetches the current state of EMR clusters"""
+    """Fetches the current state of all EMR clusters"""
     logger.debug("Fetching EMR clusters")
     states = ["STARTING", "BOOTSTRAPPING", "RUNNING", "WAITING", "TERMINATING", "TERMINATED", "TERMINATED_WITH_ERRORS"]
     try:
