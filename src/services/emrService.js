@@ -1,20 +1,22 @@
 // src/services/emrService.js
-import { emrClient } from './awsConfig';
+
+// Base URL for the Python backend API
+const API_BASE_URL = 'http://localhost:5000';
 
 /**
- * Fetches the current state of all EMR clusters
- * @returns {Promise<Array>} List of EMR clusters with their current state
+ * Fetches all clusters with their configurations and current states
+ * @returns {Promise<Array>} List of clusters with their current state
  */
 export const listClusters = async () => {
   try {
-    // List all clusters in various states
-    const states = ["STARTING", "BOOTSTRAPPING", "RUNNING", "WAITING", "TERMINATING", "TERMINATED", "TERMINATED_WITH_ERRORS"];
-    const params = {
-      ClusterStates: states,
-    };
-
-    const response = await emrClient.listClusters(params).promise();
-    return response.Clusters || [];
+    const response = await fetch(`${API_BASE_URL}/clusters`);
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to fetch clusters');
+    }
+    
+    return await response.json();
   } catch (error) {
     console.error("Error listing EMR clusters:", error);
     throw error;
@@ -23,45 +25,30 @@ export const listClusters = async () => {
 
 /**
  * Gets detailed information for a specific cluster
- * @param {string} clusterId EMR cluster ID
+ * @param {string} clusterName Name of the cluster
  * @returns {Promise<Object>} Detailed cluster information
  */
-export const getClusterDetails = async (clusterId) => {
+export const getClusterDetails = async (clusterName) => {
   try {
-    const params = {
-      ClusterId: clusterId,
-    };
-
-    const response = await emrClient.describeCluster(params).promise();
-    return response.Cluster;
+    const response = await fetch(`${API_BASE_URL}/clusters/${clusterName}`);
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || `Failed to get details for cluster ${clusterName}`);
+    }
+    
+    return await response.json();
   } catch (error) {
-    console.error(`Error getting details for cluster ${clusterId}:`, error);
+    console.error(`Error getting details for cluster ${clusterName}:`, error);
     throw error;
   }
 };
 
 /**
- * Maps cluster name to its state by finding the corresponding clusterID
- * @param {Array} clusterConfigs Configurations from Parameter Store
- * @param {Array} emrClusters List of actual EMR clusters from EMR API
- * @returns {Array} Merged information with cluster states
+ * This function is no longer needed as the backend handles the merging
+ * Keeping it as a placeholder for compatibility with existing code
  */
 export const mapClusterStates = (clusterConfigs, emrClusters) => {
-  return clusterConfigs.map(config => {
-    // Find matching EMR cluster by name
-    const matchingCluster = emrClusters.find(cluster => 
-      cluster.Name === config.name || 
-      cluster.Name.includes(config.name)
-    );
-
-    return {
-      ...config,
-      state: matchingCluster ? matchingCluster.Status.State : "TERMINATED",
-      clusterId: matchingCluster ? matchingCluster.Id : null,
-      lastStateChangeReason: matchingCluster?.Status?.StateChangeReason || null,
-      timeline: matchingCluster?.Status?.Timeline || null,
-      applications: matchingCluster?.Applications || [],
-      tags: matchingCluster?.Tags || []
-    };
-  });
+  console.warn('mapClusterStates is deprecated as the backend now handles this');
+  return clusterConfigs;
 };

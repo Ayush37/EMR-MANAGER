@@ -1,61 +1,29 @@
 // src/services/paramStoreService.js
-import { ssmClient } from './awsConfig';
 
-const PARAM_PATH = "/application/ecdp-config/UAT/EMR-BASE/";
+// This service is now mostly a placeholder as the Python backend 
+// handles Parameter Store interactions directly
+
+// We'll keep this function for compatibility with existing code
+// but it will actually just use the data already fetched by the EMR service
+import { listClusters } from './emrService';
 
 /**
  * Fetches all EMR cluster configurations from Parameter Store
+ * This is now handled by the backend and returns data from the /clusters endpoint
  * @returns {Promise<Array>} List of cluster configurations
  */
 export const fetchClusterConfigs = async () => {
   try {
-    const params = {
-      Path: PARAM_PATH,
-      Recursive: true,
-      WithDecryption: true,
-    };
-
-    // Parameter Store might return paginated results
-    let allParams = [];
-    let nextToken = null;
-
-    do {
-      if (nextToken) {
-        params.NextToken = nextToken;
-      }
-      
-      // Using the promise version of getParametersByPath
-      const response = await ssmClient.getParametersByPath(params).promise();
-      allParams = [...allParams, ...response.Parameters];
-      nextToken = response.NextToken;
-    } while (nextToken);
-
-    // Process parameters into cluster configs
-    return allParams
-      .filter(param => {
-        // Extract cluster name from the parameter name
-        const clusterName = param.Name.replace(PARAM_PATH, "");
-        // Filter out clusters with "STRESS" in their name
-        return !clusterName.includes("STRESS");
-      })
-      .map(param => {
-        const clusterName = param.Name.replace(PARAM_PATH, "");
-        let config;
-        
-        try {
-          // Parameter Store often stores JSON configurations
-          config = JSON.parse(param.Value);
-        } catch (e) {
-          config = { rawValue: param.Value };
-        }
-        
-        return {
-          name: clusterName,
-          config,
-          parameterName: param.Name,
-          lastModified: param.LastModifiedDate,
-        };
-      });
+    // The backend now returns all cluster data including configuration in one call
+    const clusters = await listClusters();
+    
+    // Return only the configuration part for compatibility
+    return clusters.map(cluster => ({
+      name: cluster.name,
+      config: cluster.config,
+      parameterName: cluster.parameterName,
+      lastModified: cluster.lastModified
+    }));
   } catch (error) {
     console.error("Error fetching cluster configurations:", error);
     throw error;

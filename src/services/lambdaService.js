@@ -1,38 +1,28 @@
 // src/services/lambdaService.js
-import { lambdaClient } from './awsConfig';
 
-const LAMBDA_FUNCTION_NAME = "app-job-submit";
+// Base URL for the Python backend API
+const API_BASE_URL = 'http://localhost:5000';
 
 /**
- * Terminates an EMR cluster by invoking the Lambda function
+ * Terminates an EMR cluster by calling the Python backend API
  * @param {string} clusterName Name of the cluster to terminate
- * @returns {Promise<Object>} Lambda function response
+ * @returns {Promise<Object>} Operation response
  */
 export const terminateCluster = async (clusterName) => {
   try {
-    const payload = {
-      resource: "/executions/clusters",
-      path: "/executions/clusters",
-      body: JSON.stringify({
-        cluster_name: clusterName,
-        job_type: "CLUSTER",
-        request_type: "DELETE",
-        fifo_key: clusterName,
-        termination_mode: "IMMEDIATE"
-      }),
-      httpMethod: "DELETE"
-    };
-
-    const params = {
-      FunctionName: LAMBDA_FUNCTION_NAME,
-      Payload: JSON.stringify(payload),
-    };
-
-    const response = await lambdaClient.invoke(params).promise();
+    const response = await fetch(`${API_BASE_URL}/clusters/${clusterName}/terminate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
     
-    // Parse the Lambda response
-    const responsePayload = Buffer.from(response.Payload).toString();
-    return JSON.parse(responsePayload);
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || `Failed to terminate cluster ${clusterName}`);
+    }
+    
+    return await response.json();
   } catch (error) {
     console.error(`Error terminating cluster ${clusterName}:`, error);
     throw error;
@@ -40,34 +30,25 @@ export const terminateCluster = async (clusterName) => {
 };
 
 /**
- * Creates a new EMR cluster by invoking the Lambda function
+ * Creates a new EMR cluster by calling the Python backend API
  * @param {string} clusterName Name of the cluster to create
- * @returns {Promise<Object>} Lambda function response
+ * @returns {Promise<Object>} Operation response
  */
 export const createCluster = async (clusterName) => {
   try {
-    const payload = {
-      resource: "/executions/clusters",
-      path: "/executions/clusters",
-      body: JSON.stringify({
-        cluster_name: clusterName,
-        job_type: "CLUSTER",
-        request_type: "CREATE",
-        fifo_key: clusterName
-      }),
-      httpMethod: "POST"
-    };
-
-    const params = {
-      FunctionName: LAMBDA_FUNCTION_NAME,
-      Payload: JSON.stringify(payload),
-    };
-
-    const response = await lambdaClient.invoke(params).promise();
+    const response = await fetch(`${API_BASE_URL}/clusters/${clusterName}/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
     
-    // Parse the Lambda response
-    const responsePayload = Buffer.from(response.Payload).toString();
-    return JSON.parse(responsePayload);
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || `Failed to start cluster ${clusterName}`);
+    }
+    
+    return await response.json();
   } catch (error) {
     console.error(`Error creating cluster ${clusterName}:`, error);
     throw error;
