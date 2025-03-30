@@ -1,56 +1,163 @@
-// src/services/lambdaService.js
+// src/hooks/useClusters.js
+import { useState, useEffect, useCallback } from 'react';
+import { listClusters } from '../services/emrService';
+import { createCluster, terminateCluster } from '../services/lambdaService';
 
-// Base URL for the Python backend API
-const API_BASE_URL = 'http://localhost:5000';
+const useClusters = () => {
+  const [clusters, setClusters] = useState([]);
+  const [filteredClusters, setFilteredClusters] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [filterText, setFilterText] = useState('');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [operationInProgress, setOperationInProgress] = useState(false);
+  const [lastOperationStatus, setLastOperationStatus] = useState(null);
 
-/**
- * Terminates an EMR cluster by calling the Python backend API
- * @param {string} clusterName Name of the cluster to terminate
- * @returns {Promise<Object>} Operation response
- */
-export const terminateCluster = async (clusterName) => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/clusters/${clusterName}/terminate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
+  // Fetch all cluster data from the Python backend
+  const fetchClusterData = useCallback(async () => {
+    try {
+      setIsRefreshing(true);
+      
+      // Get clusters from the backend
+      const clusterData = await listClusters();
+      
+      setClusters(clusterData);
+      
+      // Apply any existing filter
+      if (filterText) {
+        applyFilter(clusterData, filterText);
+      } else {
+        setFilteredClusters(clusterData);
       }
-    });
-    
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || `Failed to terminate cluster ${clusterName}`);
+      
+      setError(null);
+    } catch (err) {
+      console.error('Error fetching cluster data:', err);
+      setError(`Failed to fetch cluster data: ${err.message}`);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
     }
+  }, [filterText]);
+
+  // Apply filter to clusters
+  const applyFilter = useCallback((clusterData, filter) => {
+    const lowerCaseFilter = filter.toLowerCase();
+    const filtered = clusterData.filter(cluster => 
+      cluster.name.toLowerCase().includes(lowerCaseFilter)
+    );
+    setFilteredClusters(filtered);
+  }, []);
+
+  // Handle filter change
+  const handleFilterChange = useCallback((text) => {
+    setFilterText(text);
+    applyFilter(clusters, text);
+  }, [clusters, applyFilter]);
+
+  // Start a cluster
+  const handleStartCluster = useCallback(async (clusterName) => {
+    try {
+      setOperationInProgress(true);
+      setLastOperationStatus({ type: 'start', status: 'pending', clusterName });
+      
+      const result = await createCluster(clusterName);
+      
+      // Refresh data to show updated status
+      await fetchClusterData();
+      
+      setLastOperationStatus({ 
+        type: 'start', 
+        status: 'success', 
+        clusterName,
+        message: `Cluster ${clusterName} creation initiated successfully` 
+      });
+      
+      return result;
+    } catch (err) {
+      console.error(`Error starting cluster ${clusterName}:`, err);
+      setLastOperationStatus({ 
+        type: 'start', 
+        status: 'error', 
+        clusterName,
+        message: `Failed to start cluster: ${err.message}` 
+      });
+      throw err;
+    } finally {
+      setOperationInProgress(false);
+    }
+  }, [fetchClusterData]);
+
+  // Terminate a cluster
+  const handleTerminateCluster = useCallback(async (clusterName) => {
+    try {
+      setOperationInProgress(true);
+      setLastOperationStatus({ type: 'terminate', status: 'pending', clusterName });
+      
+      const result = await terminateCluster(clusterName);
+      
+      // Refresh data to show updated status
+      await fetchClusterData();
+      
+      setLastOperationStatus({ 
+        type: 'terminate', 
+        status: 'success', 
+        clusterName,
+        message: `Cluster ${clusterName} termination initiated successfully` 
+      });
+      
+      return result;
+    } catch (err) {
+      console.error(`Error terminating cluster ${clusterName}:`, err);
+      setLastOperationStatus({ 
+        type: 'terminate', 
+        status: 'error', 
+        clusterName,
+        message: `Failed to terminate cluster: ${err.message}` 
+      });
+      throw err;
+    } finally {
+      setOperationInProgress(false);
+    }
+  }, [fetchClusterData]);
+
+  // Manual refresh trigger
+  const refreshClusters = useCallback(() => {
+    if (!isRefreshing) {
+      fetchClusterData();
+    }
+  }, [fetchClusterData, isRefreshing]);
+
+  // Initial data fetch
+  useEffect(() => {
+    fetchClusterData();
+  }, [fetchClusterData]);
+
+  // Set up auto-refresh interval
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      if (!operationInProgress) {
+        fetchClusterData();
+      }
+    }, 5000); // Refresh every 5 seconds
     
-    return await response.json();
-  } catch (error) {
-    console.error(`Error terminating cluster ${clusterName}:`, error);
-    throw error;
-  }
+    return () => clearInterval(intervalId);
+  }, [fetchClusterData, operationInProgress]);
+
+  return {
+    clusters: filteredClusters,
+    allClusters: clusters,
+    isLoading,
+    isRefreshing,
+    error,
+    filterText,
+    handleFilterChange,
+    refreshClusters,
+    handleStartCluster,
+    handleTerminateCluster,
+    operationInProgress,
+    lastOperationStatus
+  };
 };
 
-/**
- * Creates a new EMR cluster by calling the Python backend API
- * @param {string} clusterName Name of the cluster to create
- * @returns {Promise<Object>} Operation response
- */
-export const createCluster = async (clusterName) => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/clusters/${clusterName}/start`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-    
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || `Failed to start cluster ${clusterName}`);
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error(`Error creating cluster ${clusterName}:`, error);
-    throw error;
-  }
-};
+export default useClusters;
