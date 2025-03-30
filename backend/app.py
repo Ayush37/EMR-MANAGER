@@ -5,12 +5,27 @@ import boto3
 import json
 import os
 import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG, 
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# Configure logging to file
+log_dir = 'logs'
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+
+log_file = os.path.join(log_dir, 'app.log')
+
+# Create a handler for rotating log files (10 MB max, keep 5 backup files)
+handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)
+handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+# Configure the logger
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+logger.addHandler(handler)
+
+# Remove default handlers to prevent console output
+logger.propagate = False
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -50,7 +65,7 @@ def get_clusters():
         logger.error(f"Error in get_clusters: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-@app.route('/clusters/<name>', methods=['GET'])
+@app.route('/clusters/<n>', methods=['GET'])
 def get_cluster(name):
     """Get details for a specific cluster"""
     try:
@@ -73,7 +88,7 @@ def get_cluster(name):
         logger.error(f"Error in get_cluster: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-@app.route('/clusters/<name>/start', methods=['POST'])
+@app.route('/clusters/<n>/start', methods=['POST'])
 def start_cluster(name):
     """Start a specific EMR cluster"""
     try:
@@ -105,7 +120,7 @@ def start_cluster(name):
         logger.error(f"Error starting cluster {name}: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-@app.route('/clusters/<name>/terminate', methods=['POST'])
+@app.route('/clusters/<n>/terminate', methods=['POST'])
 def terminate_cluster(name):
     """Terminate a specific EMR cluster"""
     try:
@@ -265,7 +280,18 @@ def map_cluster_states(cluster_configs, emr_clusters):
 
     return result
 
+# Configure Flask logging to file too
+if not app.debug:
+    file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+    ))
+    file_handler.setLevel(logging.INFO)
+    app.logger.addHandler(file_handler)
+    app.logger.setLevel(logging.INFO)
+    app.logger.info('EMR Cluster Manager startup')
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    logger.info(f"Starting server on port {port}")
+    print(f"Starting server on port {port}. Logs will be written to {log_file}")
     app.run(host='0.0.0.0', port=port, debug=True)
