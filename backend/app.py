@@ -12,9 +12,11 @@ CORS(app)  # Enable CORS for all routes
 
 # Configure AWS services
 # This will use the credentials from ~/.aws/credentials
-ssm = boto3.client('ssm')
-emr = boto3.client('emr')
-lambda_client = boto3.client('lambda')
+
+session = boto3.Session(profile_name='adfsjit')
+ssm = session.client('ssm')
+emr = session.client('emr')
+lambda_client = session.client('lambda')
 
 # Constants
 PARAM_STORE_PATH = "/application/ecdp-config/UAT/EMR-BASE/"
