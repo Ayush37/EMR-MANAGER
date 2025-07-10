@@ -292,7 +292,7 @@ if not app.debug:
     app.logger.info('EMR Cluster Manager startup')
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 3700))
     print(f"Starting server on port {port}. Logs will be written to {log_file}")
     app.run(host='0.0.0.0', port=port, debug=True)
 
