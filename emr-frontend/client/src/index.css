@@ -3,6 +3,55 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Custom AWS colors */
+:root {
+  --aws-blue: #232F3E;
+  --aws-blue-dark: #161E2E;
+  --aws-orange: #FF9900;
+  --aws-orange-dark: #EC7211;
+}
+
+/* Custom utility classes */
+.bg-aws-blue {
+  background-color: var(--aws-blue);
+}
+
+.bg-aws-blue-dark {
+  background-color: var(--aws-blue-dark);
+}
+
+.text-aws-blue {
+  color: var(--aws-blue);
+}
+
+.text-aws-blue-dark {
+  color: var(--aws-blue-dark);
+}
+
+.border-aws-blue {
+  border-color: var(--aws-blue);
+}
+
+.ring-aws-blue {
+  --tw-ring-color: var(--aws-blue);
+}
+
+.focus\:border-aws-blue:focus {
+  border-color: var(--aws-blue);
+}
+
+.focus\:ring-aws-blue:focus {
+  --tw-ring-color: var(--aws-blue);
+}
+
+.hover\:bg-aws-blue-dark:hover {
+  background-color: var(--aws-blue-dark);
+}
+
+.hover\:text-aws-blue-dark:hover {
+  color: var(--aws-blue-dark);
+}
+
 /* Custom animations */
 @keyframes fadeIn {
   from {
@@ -17,4 +66,23 @@
 
 .animate-fadeIn {
   animation: fadeIn 0.3s ease-in-out;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
 }

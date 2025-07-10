@@ -31,6 +31,9 @@ logger.propagate = False
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
+# Configure URL prefix for ALB routing
+URL_PREFIX = os.getenv('URL_PREFIX', '/api')
+
 # Configure AWS services
 # This will use the credentials from ~/.aws/credentials
 session = boto3.Session(profile_name='adfsjit')
@@ -38,18 +41,49 @@ ssm = session.client('ssm')
 emr = session.client('emr')
 lambda_client = session.client('lambda')
 
-# Constants
-PARAM_STORE_PATH = "/application/ecdp-config/uat1/EMR-BASE/"
-LAMBDA_FUNCTION_NAME = "app-job-submit"
+# Constants for multiple environments
+PARAM_STORE_PATHS = {
+    'uat1': "/application/ecdp-config/uat1/EMR-BASE/",
+    'uat2': "/application/ecdp-config/uat2/EMR-BASE/",
+    'uat3': "/application/ecdp-config/uat3/EMR-BASE/"
+}
 
-@app.route('/clusters', methods=['GET'])
+LAMBDA_FUNCTION_NAMES = {
+    'uat1': "app-job_submit_lambda_uat1",
+    'uat2': "app-job_submit_lambda_uat2",
+    'uat3': "app-job_submit_lambda_uat3"
+}
+
+@app.route(f'{URL_PREFIX}/clusters', methods=['GET'])
 def get_clusters():
-    """Fetch all clusters from Parameter Store and their current states"""
+    """Fetch all clusters from Parameter Store and their current states with pagination"""
     try:
         logger.debug("Fetching clusters data")
         
-        # Get cluster configurations from Parameter Store
-        cluster_configs = get_cluster_configs()
+        # Get pagination parameters
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 20))
+        environment = request.args.get('environment', 'all')
+        
+        # Validate pagination parameters
+        if page < 1:
+            page = 1
+        if limit < 1 or limit > 100:
+            limit = 20
+        
+        # Get cluster configurations from Parameter Store for selected environment(s)
+        if environment == 'all':
+            cluster_configs = []
+            for env in ['uat1', 'uat2', 'uat3']:
+                configs = get_cluster_configs(env)
+                for config in configs:
+                    config['environment'] = env.upper()
+                cluster_configs.extend(configs)
+        else:
+            cluster_configs = get_cluster_configs(environment)
+            for config in cluster_configs:
+                config['environment'] = environment.upper()
+        
         logger.debug(f"Retrieved {len(cluster_configs)} cluster configs")
         
         # Get current EMR cluster states
@@ -59,13 +93,29 @@ def get_clusters():
         # Merge the data
         merged_clusters = map_cluster_states(cluster_configs, emr_clusters)
         logger.debug(f"Merged data for {len(merged_clusters)} clusters")
-
-        return jsonify(merged_clusters)
+        
+        # Apply pagination
+        total_count = len(merged_clusters)
+        skip = (page - 1) * limit
+        paginated_clusters = merged_clusters[skip:skip + limit]
+        total_pages = (total_count + limit - 1) // limit
+        
+        return jsonify({
+            'clusters': paginated_clusters,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total_count,
+                'totalPages': total_pages,
+                'hasNext': page < total_pages,
+                'hasPrev': page > 1
+            }
+        })
     except Exception as e:
         logger.error(f"Error in get_clusters: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-@app.route('/clusters/<n>', methods=['GET'])
+@app.route(f'{URL_PREFIX}/clusters/<n>', methods=['GET'])
 def get_cluster(name):
     """Get details for a specific cluster"""
     try:
@@ -88,11 +138,18 @@ def get_cluster(name):
         logger.error(f"Error in get_cluster: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-@app.route('/clusters/<n>/start', methods=['POST'])
+@app.route(f'{URL_PREFIX}/clusters/<n>/start', methods=['POST'])
 def start_cluster(name):
     """Start a specific EMR cluster"""
     try:
         logger.debug(f"Request to start cluster: {name}")
+        
+        # Get environment from request body or determine from cluster name
+        data = request.json or {}
+        environment = data.get('environment', 'uat1')
+        
+        # Get the appropriate Lambda function for the environment
+        lambda_function_name = LAMBDA_FUNCTION_NAMES.get(environment, LAMBDA_FUNCTION_NAMES['uat1'])
             
         payload = {
             "resource": "/executions/clusters",
@@ -106,9 +163,9 @@ def start_cluster(name):
             "httpMethod": "POST"
         }
 
-        logger.debug(f"Invoking Lambda to start cluster: {name}")
+        logger.debug(f"Invoking Lambda {lambda_function_name} to start cluster: {name}")
         response = lambda_client.invoke(
-            FunctionName=LAMBDA_FUNCTION_NAME,
+            FunctionName=lambda_function_name,
             Payload=json.dumps(payload)
         )
 
@@ -120,11 +177,18 @@ def start_cluster(name):
         logger.error(f"Error starting cluster {name}: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-@app.route('/clusters/<n>/terminate', methods=['POST'])
+@app.route(f'{URL_PREFIX}/clusters/<n>/terminate', methods=['POST'])
 def terminate_cluster(name):
     """Terminate a specific EMR cluster"""
     try:
         logger.debug(f"Request to terminate cluster: {name}")
+        
+        # Get environment from request body or determine from cluster name
+        data = request.json or {}
+        environment = data.get('environment', 'uat1')
+        
+        # Get the appropriate Lambda function for the environment
+        lambda_function_name = LAMBDA_FUNCTION_NAMES.get(environment, LAMBDA_FUNCTION_NAMES['uat1'])
             
         payload = {
             "resource": "/executions/clusters",
@@ -139,9 +203,9 @@ def terminate_cluster(name):
             "httpMethod": "DELETE"
         }
 
-        logger.debug(f"Invoking Lambda to terminate cluster: {name}")
+        logger.debug(f"Invoking Lambda {lambda_function_name} to terminate cluster: {name}")
         response = lambda_client.invoke(
-            FunctionName=LAMBDA_FUNCTION_NAME,
+            FunctionName=lambda_function_name,
             Payload=json.dumps(payload)
         )
 
@@ -153,10 +217,206 @@ def terminate_cluster(name):
         logger.error(f"Error terminating cluster {name}: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
+@app.route(f'{URL_PREFIX}/clusters/<cluster_id>/steps', methods=['GET'])
+def get_cluster_steps(cluster_id):
+    """Get all steps for a specific cluster with pagination"""
+    try:
+        logger.debug(f"Fetching steps for cluster: {cluster_id}")
+        
+        # Get pagination parameters
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 20))
+        
+        # Validate pagination parameters
+        if page < 1:
+            page = 1
+        if limit < 1 or limit > 100:
+            limit = 20
+        
+        # List all steps for the cluster
+        all_steps = []
+        marker = None
+        
+        while True:
+            kwargs = {'ClusterId': cluster_id}
+            if marker:
+                kwargs['Marker'] = marker
+                
+            response = emr.list_steps(**kwargs)
+            steps = response.get('Steps', [])
+            all_steps.extend(steps)
+            
+            marker = response.get('Marker')
+            if not marker:
+                break
+        
+        # Get detailed information for each step
+        detailed_steps = []
+        for step in all_steps:
+            try:
+                step_detail = emr.describe_step(
+                    ClusterId=cluster_id,
+                    StepId=step['Id']
+                )['Step']
+                detailed_steps.append({
+                    'id': step_detail['Id'],
+                    'name': step_detail['Name'],
+                    'state': step_detail['Status']['State'],
+                    'creationDateTime': step_detail['Status']['Timeline'].get('CreationDateTime', '').isoformat() if hasattr(step_detail['Status']['Timeline'].get('CreationDateTime', ''), 'isoformat') else '',
+                    'startDateTime': step_detail['Status']['Timeline'].get('StartDateTime', '').isoformat() if hasattr(step_detail['Status']['Timeline'].get('StartDateTime', ''), 'isoformat') else '',
+                    'endDateTime': step_detail['Status']['Timeline'].get('EndDateTime', '').isoformat() if hasattr(step_detail['Status']['Timeline'].get('EndDateTime', ''), 'isoformat') else '',
+                    'actionOnFailure': step_detail.get('ActionOnFailure', ''),
+                    'config': step_detail.get('Config', {})
+                })
+            except Exception as e:
+                logger.error(f"Error getting step details for {step['Id']}: {str(e)}")
+                detailed_steps.append({
+                    'id': step['Id'],
+                    'name': step['Name'],
+                    'state': step['Status']['State'],
+                    'error': 'Failed to get details'
+                })
+        
+        # Apply pagination
+        total_count = len(detailed_steps)
+        skip = (page - 1) * limit
+        paginated_steps = detailed_steps[skip:skip + limit]
+        total_pages = (total_count + limit - 1) // limit
+        
+        return jsonify({
+            'steps': paginated_steps,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total_count,
+                'totalPages': total_pages,
+                'hasNext': page < total_pages,
+                'hasPrev': page > 1
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error fetching steps for cluster {cluster_id}: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+@app.route(f'{URL_PREFIX}/clusters/<cluster_id>/steps/<step_id>', methods=['GET'])
+def get_step_details(cluster_id, step_id):
+    """Get detailed information for a specific step"""
+    try:
+        logger.debug(f"Fetching step details for step {step_id} in cluster {cluster_id}")
+        
+        response = emr.describe_step(
+            ClusterId=cluster_id,
+            StepId=step_id
+        )
+        
+        step = response['Step']
+        
+        return jsonify({
+            'step': {
+                'id': step['Id'],
+                'name': step['Name'],
+                'state': step['Status']['State'],
+                'stateChangeReason': step['Status'].get('StateChangeReason', {}),
+                'failureDetails': step['Status'].get('FailureDetails', {}),
+                'timeline': {
+                    'creationDateTime': step['Status']['Timeline'].get('CreationDateTime', '').isoformat() if hasattr(step['Status']['Timeline'].get('CreationDateTime', ''), 'isoformat') else '',
+                    'startDateTime': step['Status']['Timeline'].get('StartDateTime', '').isoformat() if hasattr(step['Status']['Timeline'].get('StartDateTime', ''), 'isoformat') else '',
+                    'endDateTime': step['Status']['Timeline'].get('EndDateTime', '').isoformat() if hasattr(step['Status']['Timeline'].get('EndDateTime', ''), 'isoformat') else ''
+                },
+                'actionOnFailure': step.get('ActionOnFailure', ''),
+                'config': step.get('Config', {})
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error fetching step details: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+@app.route(f'{URL_PREFIX}/clusters/<cluster_id>/steps', methods=['POST'])
+def add_step(cluster_id):
+    """Add a new step to a cluster (duplicate an existing step)"""
+    try:
+        logger.debug(f"Adding step to cluster: {cluster_id}")
+        
+        data = request.json
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+            
+        # Extract step configuration from request
+        step_config = {
+            'Name': data.get('name', 'Duplicated Step'),
+            'ActionOnFailure': data.get('actionOnFailure', 'CONTINUE'),
+            'HadoopJarStep': data.get('hadoopJarStep', {})
+        }
+        
+        # Add the step to the cluster
+        response = emr.add_job_flow_steps(
+            JobFlowId=cluster_id,
+            Steps=[step_config]
+        )
+        
+        step_ids = response.get('StepIds', [])
+        logger.debug(f"Successfully added step(s): {step_ids}")
+        
+        return jsonify({
+            'stepIds': step_ids,
+            'message': 'Step added successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error adding step: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+@app.route(f'{URL_PREFIX}/clusters/<cluster_id>/steps/<step_id>/cancel', methods=['POST'])
+def cancel_step(cluster_id, step_id):
+    """Cancel a running step"""
+    try:
+        logger.debug(f"Cancelling step {step_id} in cluster {cluster_id}")
+        
+        # First check if the step is in a cancellable state
+        step_response = emr.describe_step(
+            ClusterId=cluster_id,
+            StepId=step_id
+        )
+        
+        step_state = step_response['Step']['Status']['State']
+        if step_state not in ['PENDING', 'RUNNING']:
+            return jsonify({
+                "error": f"Step is in {step_state} state and cannot be cancelled"
+            }), 400
+        
+        # Cancel the step
+        response = emr.cancel_steps(
+            ClusterId=cluster_id,
+            StepIds=[step_id]
+        )
+        
+        cancel_steps_info = response.get('CancelStepsInfoList', [])
+        
+        return jsonify({
+            'message': 'Step cancellation initiated',
+            'cancelInfo': cancel_steps_info
+        })
+        
+    except Exception as e:
+        logger.error(f"Error cancelling step: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+@app.route(f'{URL_PREFIX}/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'healthy',
+        'service': 'emr-backend',
+        'timestamp': datetime.now().isoformat()
+    })
+
 # Helper functions
-def get_cluster_configs():
-    """Fetches all EMR cluster configurations from Parameter Store"""
-    logger.debug(f"Fetching cluster configs from Parameter Store at path: {PARAM_STORE_PATH}")
+def get_cluster_configs(environment='uat1'):
+    """Fetches all EMR cluster configurations from Parameter Store for a specific environment"""
+    param_store_path = PARAM_STORE_PATHS.get(environment, PARAM_STORE_PATHS['uat1'])
+    logger.debug(f"Fetching cluster configs from Parameter Store at path: {param_store_path}")
     
     params = []
     next_token = None
@@ -164,7 +424,7 @@ def get_cluster_configs():
     try:
         while True:
             kwargs = {
-                'Path': PARAM_STORE_PATH,
+                'Path': param_store_path,
                 'Recursive': True,
                 'WithDecryption': True
             }
@@ -190,7 +450,7 @@ def get_cluster_configs():
         # Process parameters into cluster configs
         cluster_configs = []
         for param in params:
-            cluster_name = param['Name'].replace(PARAM_STORE_PATH, "")
+            cluster_name = param['Name'].replace(param_store_path, "")
             # Filter out clusters with "STRESS" in their name
             if "STRESS" not in cluster_name:
                 try:
