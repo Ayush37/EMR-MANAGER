@@ -5,6 +5,8 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 
 // Serve static files from the React app build directory
+// For ALB routing, we need to serve from /parameters path
+app.use('/parameters', express.static(path.join(__dirname, '../client/build')));
 app.use(express.static(path.join(__dirname, '../client/build')));
 
 // Health check endpoint for monitoring
