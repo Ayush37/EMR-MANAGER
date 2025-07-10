@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import ReactJson from 'react-json-view';
+import JsonView from '@uiw/react-json-view';
 import ssmService from '../services/ssmService';
 import LoadingSpinner from './LoadingSpinner';
 import { formatDate } from '../utils/formatters';
@@ -141,21 +141,16 @@ const ParameterDetailsModal = ({ parameter, onClose, onEdit, onViewHistory }) =>
                     <p className="text-sm text-red-800">Access Denied</p>
                   </div>
                 ) : (
-                  <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
-                    <ReactJson
-                      src={parseJsonValue(parameterDetails.value)}
-                      theme="rjv-default"
-                      collapsed={false}
-                      collapseStringsAfterLength={50}
+                  <div className="bg-gray-50 border border-gray-200 rounded-md p-4 overflow-auto">
+                    <JsonView
+                      value={parseJsonValue(parameterDetails.value)}
+                      collapsed={1}
                       displayDataTypes={false}
                       displayObjectSize={false}
-                      enableClipboard={(copy) => {
-                        // Custom clipboard handler for individual values
-                        navigator.clipboard.writeText(copy.src);
-                      }}
                       style={{
                         backgroundColor: 'transparent',
                         fontSize: '14px',
+                        fontFamily: 'Monaco, Menlo, monospace',
                       }}
                     />
                   </div>
