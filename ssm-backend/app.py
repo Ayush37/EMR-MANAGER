@@ -143,17 +143,7 @@ def list_parameters_by_path(path_prefix, page=1, limit=50):
                 response = ssm_client.get_parameters_by_path(**params)
                 
                 for param in response.get('Parameters', []):
-                    # Get parameter metadata
-                    try:
-                        desc_response = ssm_client.describe_parameters(
-                            Filters=[{'Key': 'Name', 'Values': [param['Name']]}]
-                        )
-                        if desc_response['Parameters']:
-                            metadata = desc_response['Parameters'][0]
-                            param.update(metadata)
-                    except:
-                        pass
-                    
+                    # Format parameter without additional metadata
                     all_parameters.append(format_parameter(param))
                 
                 next_token = response.get('NextToken')
@@ -218,67 +208,8 @@ def list_parameters(prefix=None):
         # Use provided prefix or default to /application
         path_prefix = f'/{prefix}' if prefix else PARAMETER_PREFIX
         
-        all_parameters = []
-        next_token = None
-        total_fetched = 0
-        skip = (page - 1) * limit
-        
-        while True:
-            params = {
-                'ParameterFilters': [
-                    {
-                        'Key': 'Name',
-                        'Option': 'BeginsWith',
-                        'Values': [path_prefix]
-                    }
-                ],
-                'MaxResults': 50
-            }
-            
-            if next_token:
-                params['NextToken'] = next_token
-            
-            try:
-                response = ssm_client.describe_parameters(**params)
-                
-                for param in response.get('Parameters', []):
-                    # Don't fetch values in listing anymore - they'll be fetched on demand
-                    all_parameters.append(format_parameter(param))
-                
-                next_token = response.get('NextToken')
-                
-                # Check if we have enough parameters for the requested page
-                if len(all_parameters) >= skip + limit:
-                    break
-                    
-                if not next_token:
-                    break
-                    
-            except ClientError as e:
-                app.logger.error(f'Error listing parameters: {str(e)}')
-                if e.response['Error']['Code'] == 'AccessDeniedException':
-                    return jsonify({'error': 'Access denied to parameter store'}), 403
-                elif 'ValidationException' in str(e):
-                    # Try alternative method using get_parameters_by_path
-                    return list_parameters_by_path(path_prefix, page, limit)
-                return jsonify({'error': str(e)}), 500
-        
-        # Calculate pagination info
-        total_count = len(all_parameters)
-        paginated_params = all_parameters[skip:skip + limit]
-        total_pages = (total_count + limit - 1) // limit
-        
-        return jsonify({
-            'parameters': paginated_params,
-            'pagination': {
-                'page': page,
-                'limit': limit,
-                'total': total_count,
-                'totalPages': total_pages,
-                'hasNext': page < total_pages,
-                'hasPrev': page > 1
-            }
-        })
+        # Use get_parameters_by_path directly since we don't have describe_parameters permission
+        return list_parameters_by_path(path_prefix, page, limit)
         
     except Exception as e:
         app.logger.error(f'Unexpected error in list_parameters: {str(e)}')
