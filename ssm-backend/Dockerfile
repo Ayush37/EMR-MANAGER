@@ -1,7 +1,7 @@
 # Dockerfile
 
 # Use the specified base image
-FROM docker.jpmchase.net/container-base/managedbaseimages/python:3.9-stable
+FROM jetae-publish.prod.aws.jpmchase.net/container-base/managedbaseimages/python:3.13.3-stable
 
 # URL to get source code for building the image (string)
 LABEL org.opencontainers.image.source="https://${REPO_HOSTNAME}/projects/${PROJECT}/repos/${REPO}/browse?at=${COMMIT_HASH}"
