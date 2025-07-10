@@ -17,6 +17,9 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
+# Configure URL prefix for ALB routing
+URL_PREFIX = os.getenv('URL_PREFIX', '/ssm-api')
+
 # Configure logging
 log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
 
@@ -185,6 +188,7 @@ def list_parameters_by_path(path_prefix, page=1, limit=50):
         return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/health', methods=['GET'])
+@app.route(f'{URL_PREFIX}/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
     return jsonify({
@@ -193,8 +197,8 @@ def health_check():
         'timestamp': datetime.now().isoformat()
     })
 
-@app.route('/allparameters', methods=['GET'])
-@app.route('/allparameters/<path:prefix>', methods=['GET'])
+@app.route(f'{URL_PREFIX}/allparameters', methods=['GET'])
+@app.route(f'{URL_PREFIX}/allparameters/<path:prefix>', methods=['GET'])
 def list_parameters(prefix=None):
     """List all parameters under specified prefix or /application with pagination"""
     try:
@@ -280,7 +284,7 @@ def list_parameters(prefix=None):
         app.logger.error(f'Unexpected error in list_parameters: {str(e)}')
         return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/parameter/<path:name>', methods=['GET'])
+@app.route(f'{URL_PREFIX}/parameter/<path:name>', methods=['GET'])
 def get_parameter(name):
     """Get a specific parameter by name"""
     try:
@@ -319,7 +323,7 @@ def get_parameter(name):
         app.logger.error(f'Unexpected error in get_parameter: {str(e)}')
         return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/parameters', methods=['POST'])
+@app.route(f'{URL_PREFIX}/parameters', methods=['POST'])
 def create_parameter():
     """Create a new parameter"""
     try:
@@ -379,7 +383,7 @@ def create_parameter():
         app.logger.error(f'Unexpected error in create_parameter: {str(e)}')
         return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/parameter/<path:name>', methods=['PUT'])
+@app.route(f'{URL_PREFIX}/parameter/<path:name>', methods=['PUT'])
 def update_parameter(name):
     """Update an existing parameter"""
     try:
@@ -436,7 +440,7 @@ def update_parameter(name):
         app.logger.error(f'Unexpected error in update_parameter: {str(e)}')
         return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/parameter/<path:name>/history', methods=['GET'])
+@app.route(f'{URL_PREFIX}/parameter/<path:name>/history', methods=['GET'])
 def get_parameter_history(name):
     """Get parameter history (last 5 versions)"""
     try:
