@@ -26,7 +26,9 @@ class SSMService {
 
   async getParameter(name) {
     try {
-      const response = await fetch(`${API_BASE_URL}/parameter/${encodeURIComponent(name)}`, {
+      // Don't encode slashes, as they're part of the path
+      const encodedName = name.split('/').map(segment => encodeURIComponent(segment)).join('/');
+      const response = await fetch(`${API_BASE_URL}/parameter${encodedName}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -57,7 +59,9 @@ class SSMService {
 
   async updateParameter(name, value, description = '') {
     try {
-      const response = await fetch(`${API_BASE_URL}/parameter/${encodeURIComponent(name)}`, {
+      // Don't encode slashes, as they're part of the path
+      const encodedName = name.split('/').map(segment => encodeURIComponent(segment)).join('/');
+      const response = await fetch(`${API_BASE_URL}/parameter${encodedName}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -73,7 +77,9 @@ class SSMService {
 
   async getParameterHistory(name) {
     try {
-      const response = await fetch(`${API_BASE_URL}/parameter/${encodeURIComponent(name)}/history`, {
+      // Don't encode slashes, as they're part of the path
+      const encodedName = name.split('/').map(segment => encodeURIComponent(segment)).join('/');
+      const response = await fetch(`${API_BASE_URL}/parameter${encodedName}/history`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',

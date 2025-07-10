@@ -23,7 +23,8 @@ const ParameterDetailsModal = ({ parameter, onClose, onEdit, onViewHistory }) =>
       const response = await ssmService.getParameter(parameter.name);
       setParameterDetails(response.parameter);
     } catch (err) {
-      setError(err.message);
+      console.error('Error fetching parameter details:', err);
+      setError(err.message || 'Failed to fetch parameter details');
     } finally {
       setLoading(false);
     }
@@ -171,8 +172,7 @@ const ParameterDetailsModal = ({ parameter, onClose, onEdit, onViewHistory }) =>
           <div className="space-x-3">
             <button
               onClick={() => {
-                onViewHistory(parameter);
-                onClose();
+                onViewHistory(parameterDetails || parameter);
               }}
               className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-aws-blue transition-colors"
             >
@@ -180,8 +180,7 @@ const ParameterDetailsModal = ({ parameter, onClose, onEdit, onViewHistory }) =>
             </button>
             <button
               onClick={() => {
-                onEdit(parameter);
-                onClose();
+                onEdit(parameterDetails || parameter);
               }}
               disabled={parameterDetails?.value === 'Access Denied'}
               className="px-4 py-2 bg-aws-blue text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-aws-blue disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
