@@ -16,6 +16,7 @@ LABEL org.opencontainers.image.title="ssm-parameter-manager"
 ENV APP_NAME="ssm-parameter-manager"
 ENV PORT="3700"
 ENV LOG_LEVEL="INFO"
+ENV USE_IAM_ROLE="true"
 
 # Set the working directory
 WORKDIR /app

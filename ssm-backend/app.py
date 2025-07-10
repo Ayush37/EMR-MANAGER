@@ -53,15 +53,23 @@ app.logger.addHandler(file_handler)
 app.logger.info(f'SSM Backend service started with log level: {log_level}')
 
 # AWS Configuration
-AWS_PROFILE = os.getenv('AWS_PROFILE', 'adfsjit')
 AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
 PARAMETER_PREFIX = '/application'
 
 # Initialize AWS clients
 try:
-    session = boto3.Session(profile_name=AWS_PROFILE, region_name=AWS_REGION)
-    ssm_client = session.client('ssm')
-    app.logger.info(f'AWS session initialized with profile: {AWS_PROFILE}')
+    # Check if running in ECS/Lambda (AWS_EXECUTION_ENV is set) or if profile is explicitly disabled
+    if os.getenv('AWS_EXECUTION_ENV') or os.getenv('USE_IAM_ROLE', 'false').lower() == 'true':
+        # Use IAM role credentials (for ECS/Lambda)
+        session = boto3.Session(region_name=AWS_REGION)
+        ssm_client = session.client('ssm')
+        app.logger.info('AWS session initialized with IAM role credentials')
+    else:
+        # Use profile for local development
+        AWS_PROFILE = os.getenv('AWS_PROFILE', 'adfsjit')
+        session = boto3.Session(profile_name=AWS_PROFILE, region_name=AWS_REGION)
+        ssm_client = session.client('ssm')
+        app.logger.info(f'AWS session initialized with profile: {AWS_PROFILE}')
 except Exception as e:
     app.logger.error(f'Failed to initialize AWS session: {str(e)}')
     ssm_client = None
