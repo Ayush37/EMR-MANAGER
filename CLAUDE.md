@@ -158,8 +158,16 @@ The project uses Docker for containerization:
 - Images are based on enterprise JPMorgan Chase base images
 - Backend runs on port 3700, frontend server on port 8080
 - ECS deployment with ALB routing:
-  - `/emr/*` → EMR service
-  - `/parameters/*` → SSM service
+  - `/api/*` → EMR backend service
+  - `/emr/*` → EMR frontend service
+  - `/ssm-api/*` → SSM backend service
+  - `/parameters/*` → SSM frontend service
+- Base URL: `https://accessaws-uat.prod.aws.jpmchase.net`
+
+### API URL Configuration
+- Frontend uses **relative URLs** for production (e.g., `/ssm-api`)
+- No environment configuration needed in production
+- For local development: Set `REACT_APP_API_URL=http://localhost:3700` in `.env`
 
 ## Recent Additions (SSM Service)
 
@@ -182,6 +190,8 @@ The project uses Docker for containerization:
 2. **URL Encoding**: Preserves slashes in parameter paths
 3. **JSON Validation**: All parameter values must be valid JSON
 4. **React 18 Compatibility**: Using @uiw/react-json-view instead of react-json-view
+5. **Relative URLs**: Frontend uses `/ssm-api` for API calls (no domain needed)
+6. **ALB Path Patterns**: Each service has separate frontend and backend paths
 
 ## Adding New Services
 
@@ -206,7 +216,9 @@ When adding new AWS services (DynamoDB, S3, etc.), follow this pattern:
    - Consistent error handling
 
 4. **ALB Routing**:
-   - Define new path prefix (e.g., `/dynamodb/*`, `/s3/*`)
+   - Frontend path: `/service-name/*` (e.g., `/dynamodb/*`, `/s3/*`)
+   - Backend API path: `/service-name-api/*` (e.g., `/dynamodb-api/*`, `/s3-api/*`)
+   - Configure frontend to use relative URLs: `/service-name-api`
    - Update ECS service and target group configuration
 
 5. **Shared Components**:
