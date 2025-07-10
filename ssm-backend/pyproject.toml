@@ -5,7 +5,7 @@ description = "SSM Parameter Manager Flask Application"
 authors = ["Your Name <your.email@example.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.7"
+python = "^3.9"
 flask = "^2.2.3"
 flask-cors = "^3.0.10"
 boto3 = "^1.26.84"

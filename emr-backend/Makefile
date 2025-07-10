@@ -85,7 +85,7 @@ setup-py: ## Create setup.py file required for building wheel
 	@echo "        \"boto3\"," >> setup.py
 	@echo "        \"waitress\"," >> setup.py
 	@echo "    ]," >> setup.py
-	@echo "    python_requires=\">=3.7\"," >> setup.py
+	@echo "    python_requires=\">=3.9\"," >> setup.py
 	@echo ")" >> setup.py
 
 .PHONY: wheel
