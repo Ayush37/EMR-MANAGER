@@ -57,8 +57,11 @@ function App() {
     fetchParameters(currentPage);
   }, [currentPage]);
 
-  // Remove the filtered parameters logic since we'll handle search server-side later
-  const filteredParameters = parameters;
+  // Filter parameters based on search term
+  const filteredParameters = parameters.filter(param => 
+    param.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (param.description && param.description.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
 
   const handleParameterClick = (parameter) => {
     setSelectedParameter(parameter);
