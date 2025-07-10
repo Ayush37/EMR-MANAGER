@@ -9,9 +9,9 @@ class SSMService {
     return response.json();
   }
 
-  async listParameters() {
+  async listParameters(page = 1, limit = 50) {
     try {
-      const response = await fetch(`${API_BASE_URL}/allparameters`, {
+      const response = await fetch(`${API_BASE_URL}/allparameters?page=${page}&limit=${limit}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',

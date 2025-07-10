@@ -65,11 +65,12 @@ def format_parameter(param):
         'type': param.get('Type', 'String')
     }
 
-def list_parameters_by_path(path_prefix):
-    """Alternative method to list parameters using get_parameters_by_path"""
+def list_parameters_by_path(path_prefix, page=1, limit=50):
+    """Alternative method to list parameters using get_parameters_by_path with pagination"""
     try:
         all_parameters = []
         next_token = None
+        skip = (page - 1) * limit
         
         while True:
             params = {
@@ -108,7 +109,22 @@ def list_parameters_by_path(path_prefix):
                     return jsonify({'error': 'Access denied to parameter store'}), 403
                 return jsonify({'error': str(e)}), 500
         
-        return jsonify({'parameters': all_parameters})
+        # Calculate pagination info
+        total_count = len(all_parameters)
+        paginated_params = all_parameters[skip:skip + limit]
+        total_pages = (total_count + limit - 1) // limit
+        
+        return jsonify({
+            'parameters': paginated_params,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total_count,
+                'totalPages': total_pages,
+                'hasNext': page < total_pages,
+                'hasPrev': page > 1
+            }
+        })
         
     except Exception as e:
         app.logger.error(f'Unexpected error in list_parameters_by_path: {str(e)}')
@@ -126,16 +142,28 @@ def health_check():
 @app.route('/allparameters', methods=['GET'])
 @app.route('/allparameters/<path:prefix>', methods=['GET'])
 def list_parameters(prefix=None):
-    """List all parameters under specified prefix or /application"""
+    """List all parameters under specified prefix or /application with pagination"""
     try:
         if not ssm_client:
             return jsonify({'error': 'AWS client not initialized'}), 500
         
+        # Get pagination parameters from query string
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 50))
+        
+        # Validate pagination parameters
+        if page < 1:
+            page = 1
+        if limit < 1 or limit > 100:
+            limit = 50
+            
         # Use provided prefix or default to /application
         path_prefix = f'/{prefix}' if prefix else PARAMETER_PREFIX
         
         all_parameters = []
         next_token = None
+        total_fetched = 0
+        skip = (page - 1) * limit
         
         while True:
             params = {
@@ -156,19 +184,15 @@ def list_parameters(prefix=None):
                 response = ssm_client.describe_parameters(**params)
                 
                 for param in response.get('Parameters', []):
-                    # Get parameter value
-                    try:
-                        value_response = ssm_client.get_parameter(Name=param['Name'])
-                        param['Value'] = value_response['Parameter']['Value']
-                    except ClientError as e:
-                        if e.response['Error']['Code'] == 'AccessDeniedException':
-                            param['Value'] = 'Access Denied'
-                        else:
-                            param['Value'] = 'Error retrieving value'
-                    
+                    # Don't fetch values in listing anymore - they'll be fetched on demand
                     all_parameters.append(format_parameter(param))
                 
                 next_token = response.get('NextToken')
+                
+                # Check if we have enough parameters for the requested page
+                if len(all_parameters) >= skip + limit:
+                    break
+                    
                 if not next_token:
                     break
                     
@@ -178,10 +202,25 @@ def list_parameters(prefix=None):
                     return jsonify({'error': 'Access denied to parameter store'}), 403
                 elif 'ValidationException' in str(e):
                     # Try alternative method using get_parameters_by_path
-                    return list_parameters_by_path(path_prefix)
+                    return list_parameters_by_path(path_prefix, page, limit)
                 return jsonify({'error': str(e)}), 500
         
-        return jsonify({'parameters': all_parameters})
+        # Calculate pagination info
+        total_count = len(all_parameters)
+        paginated_params = all_parameters[skip:skip + limit]
+        total_pages = (total_count + limit - 1) // limit
+        
+        return jsonify({
+            'parameters': paginated_params,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total_count,
+                'totalPages': total_pages,
+                'hasNext': page < total_pages,
+                'hasPrev': page > 1
+            }
+        })
         
     except Exception as e:
         app.logger.error(f'Unexpected error in list_parameters: {str(e)}')
