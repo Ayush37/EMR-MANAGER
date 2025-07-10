@@ -27,10 +27,13 @@ A web application for managing AWS Systems Manager (SSM) Parameter Store paramet
 npm install
 ```
 
-2. Configure the backend API URL (optional):
+2. For local development, create a `.env` file:
 ```bash
-export REACT_APP_API_URL=http://your-backend-url:3700
+cp .env.example .env
+# Edit .env to set REACT_APP_API_URL=http://localhost:3700
 ```
+
+Note: In production, the app uses relative URLs (`/ssm-api`) so no configuration is needed.
 
 ## Development
 

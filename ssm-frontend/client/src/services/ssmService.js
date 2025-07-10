@@ -1,4 +1,6 @@
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3700';
+// Use relative URL for production (same domain/ALB)
+// For local development, you can override with REACT_APP_API_URL env variable
+const API_BASE_URL = process.env.REACT_APP_API_URL || '/ssm-api';
 
 class SSMService {
   async handleResponse(response) {
