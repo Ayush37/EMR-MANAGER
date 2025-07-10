@@ -18,18 +18,39 @@ app = Flask(__name__)
 CORS(app)
 
 # Configure logging
+log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
+
+# Set up root logger
+logging.basicConfig(
+    level=getattr(logging, log_level),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# Configure Flask app logger
+app.logger.setLevel(getattr(logging, log_level))
+
+# Add console handler for CloudWatch
+console_handler = logging.StreamHandler()
+console_handler.setLevel(getattr(logging, log_level))
+console_handler.setFormatter(logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+))
+app.logger.addHandler(console_handler)
+
+# Add file handler as backup
 log_dir = 'logs'
 os.makedirs(log_dir, exist_ok=True)
-
 log_file = os.path.join(log_dir, 'ssm-backend.log')
-handler = RotatingFileHandler(log_file, maxBytes=10485760, backupCount=5)
-handler.setFormatter(logging.Formatter(
-    '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
-))
 
-app.logger.addHandler(handler)
-app.logger.setLevel(logging.INFO)
-app.logger.info('SSM Backend service started')
+file_handler = RotatingFileHandler(log_file, maxBytes=10485760, backupCount=5)
+file_handler.setLevel(getattr(logging, log_level))
+file_handler.setFormatter(logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s [in %(pathname)s:%(lineno)d]'
+))
+app.logger.addHandler(file_handler)
+
+# Log startup
+app.logger.info(f'SSM Backend service started with log level: {log_level}')
 
 # AWS Configuration
 AWS_PROFILE = os.getenv('AWS_PROFILE', 'adfsjit')
@@ -44,6 +65,24 @@ try:
 except Exception as e:
     app.logger.error(f'Failed to initialize AWS session: {str(e)}')
     ssm_client = None
+
+# Request logging middleware
+@app.before_request
+def log_request_info():
+    """Log information about incoming requests"""
+    app.logger.debug('Headers: %s', request.headers)
+    app.logger.info('Request: %s %s', request.method, request.path)
+    if request.get_json():
+        app.logger.debug('Body: %s', request.get_json())
+
+@app.after_request
+def log_response_info(response):
+    """Log information about outgoing responses"""
+    app.logger.info('Response: %s %s - Status: %s', 
+                    request.method, 
+                    request.path, 
+                    response.status)
+    return response
 
 def validate_json(value):
     """Validate if a string is valid JSON"""
@@ -450,12 +489,18 @@ def get_parameter_history(name):
 
 @app.errorhandler(404)
 def not_found(error):
+    app.logger.warning(f'404 Not Found: {request.method} {request.path}')
     return jsonify({'error': 'Not found'}), 404
 
 @app.errorhandler(500)
 def internal_error(error):
-    app.logger.error(f'Internal error: {str(error)}')
+    app.logger.error(f'500 Internal Server Error: {request.method} {request.path} - {str(error)}', exc_info=True)
     return jsonify({'error': 'Internal server error'}), 500
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    app.logger.error(f'Unexpected error: {request.method} {request.path} - {str(error)}', exc_info=True)
+    return jsonify({'error': 'An unexpected error occurred'}), 500
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 3700))
