@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 EMR-MANAGER is a multi-service web application platform for managing various AWS services. Currently implemented:
-1. **EMR Service**: Manage Amazon EMR (Elastic MapReduce) clusters
-2. **SSM Service**: Manage AWS Systems Manager Parameter Store
+1. **EMR Service**: Manage Amazon EMR (Elastic MapReduce) clusters with multi-environment support
+2. **SSM Service**: Manage AWS Systems Manager Parameter Store with full CRUD operations
 
 Future services planned: DynamoDB, S3, and other AWS services following the same architecture.
 
@@ -99,18 +99,32 @@ npm start
 
 ## AWS Integration Details
 
-- **AWS Profile**: The backend uses the hardcoded profile `adfsjit` in `app.py:39`
-- **Parameter Store Path**: `/application/ecdp-config/uat1/EMR-BASE/`
-- **Lambda Function**: `app-job-submit` for cluster operations
-- **Required Permissions**: SSM Parameter Store read, EMR operations, Lambda invoke
+### EMR Service
+- **AWS Profile**: The backend uses the hardcoded profile `adfsjit`
+- **Parameter Store Paths**: 
+  - UAT1: `/application/ecdp-config/uat1/EMR-BASE/`
+  - UAT2: `/application/ecdp-config/uat2/EMR-BASE/`
+  - UAT3: `/application/ecdp-config/uat3/EMR-BASE/`
+- **Lambda Functions**: 
+  - UAT1: `app-job_submit_lambda_uat1`
+  - UAT2: `app-job_submit_lambda_uat2`
+  - UAT3: `app-job_submit_lambda_uat3`
+- **Required Permissions**: SSM Parameter Store read, EMR operations (ListClusters, DescribeCluster, ListSteps, DescribeStep, AddJobFlowSteps, CancelSteps), Lambda invoke
+
+### SSM Service
+- **AWS Profile**: Same as above
+- **Parameter Store Path**: Can browse any path
+- **Required Permissions**: GetParameters, GetParametersHistory, GetParametersByPath, GetParameter, PutParameter (WriteParameterStore)
 
 ## Important Implementation Notes
 
 1. **No Direct AWS Access from Frontend**: All AWS operations are proxied through the Python backend for security
-2. **Polling Mechanism**: Frontend polls backend every 5 seconds for cluster status updates
+2. **Polling Mechanism**: EMR frontend auto-refreshes every 30 seconds
 3. **Cluster Filtering**: Clusters with "STRESS" in their name are automatically filtered out
 4. **Logging**: Backend implements file-based logging with rotation in the `logs/` directory
 5. **CORS**: Backend has CORS enabled for frontend communication
+6. **Environment Persistence**: Selected environment filter is saved in localStorage
+7. **URL Prefixes**: Each backend service uses URL prefix for ALB routing (e.g., `/api`, `/ssm-api`)
 
 ## Code Organization
 
@@ -121,26 +135,32 @@ npm start
 - `Dockerfile`: Container configuration
 
 ### Frontend Structure
-- `/src/components/`: React components (ClusterTable, StatusBadge, etc.)
-- `/src/hooks/`: Custom React hooks (useClusters, useClusterOperations)
-- `/src/services/`: Backend API integration
-- `/src/utils/`: Utility functions (formatters, filters)
+- `/src/components/`: React components
+- `/src/services/`: Backend API integration (emrService.js, ssmService.js)
+- `/src/utils/`: Utility functions (formatters.js)
 - `/src/App.js`: Main application component
+- Common components: Pagination, SearchBar, LoadingSpinner, ErrorMessage
 
 ## API Endpoints
 
 ### EMR Service
-- `GET /clusters`: List all EMR clusters
-- `GET /clusters/<name>`: Get specific cluster details
-- `POST /clusters/<name>/start`: Start a cluster
-- `POST /clusters/<name>/terminate`: Terminate a cluster
+- `GET /api/clusters`: List all EMR clusters with pagination (?page=1&limit=20&environment=all|uat1|uat2|uat3)
+- `GET /api/clusters/<name>`: Get specific cluster details
+- `POST /api/clusters/<name>/start`: Start a cluster (requires environment in body)
+- `POST /api/clusters/<name>/terminate`: Terminate a cluster (requires environment in body)
+- `GET /api/clusters/<cluster_id>/steps`: List cluster steps with pagination
+- `GET /api/clusters/<cluster_id>/steps/<step_id>`: Get step details
+- `POST /api/clusters/<cluster_id>/steps`: Duplicate/add a step
+- `POST /api/clusters/<cluster_id>/steps/<step_id>/cancel`: Cancel a running step
+- `GET /api/health`: Health check endpoint
 
 ### SSM Service
-- `GET /allparameters`: List parameters with pagination (?page=1&limit=50)
-- `GET /parameter/<path:name>`: Get specific parameter details
-- `POST /parameters`: Create new parameter (JSON validation required)
-- `PUT /parameter/<path:name>`: Update parameter value
-- `GET /parameter/<path:name>/history`: Get parameter history (last 5 versions)
+- `GET /ssm-api/allparameters`: List parameters with pagination (?page=1&limit=50)
+- `GET /ssm-api/parameter/<path:name>`: Get specific parameter details
+- `POST /ssm-api/parameters`: Create new parameter (JSON validation required)
+- `PUT /ssm-api/parameter/<path:name>`: Update parameter value
+- `GET /ssm-api/parameter/<path:name>/history`: Get parameter history (last 5 versions)
+- `GET /ssm-api/health`: Health check endpoint
 
 ## Development Workflow
 
@@ -168,6 +188,31 @@ The project uses Docker for containerization:
 - Frontend uses **relative URLs** for production (e.g., `/ssm-api`)
 - No environment configuration needed in production
 - For local development: Set `REACT_APP_API_URL=http://localhost:3700` in `.env`
+
+## Recent Additions (EMR Service Redesign)
+
+### Backend Enhancements
+1. **Multi-Environment Support**: Added support for UAT1/UAT2/UAT3 with separate Lambda functions
+2. **EMR Steps Management**: Full CRUD operations for EMR steps
+3. **Enhanced Pagination**: Consistent pagination across all endpoints
+4. **Environment-Aware Operations**: Start/terminate operations use environment-specific Lambdas
+5. **Step Details**: Comprehensive step information including timeline and failure details
+
+### Frontend Features
+1. **Environment Filter**: Dropdown selector with localStorage persistence
+2. **Enhanced Cluster Table**: Added environment, step count, and last activity columns
+3. **Cluster Steps Modal**: View all steps for a cluster with pagination
+4. **Step Management**: Duplicate steps with edit capability, cancel running steps
+5. **Step Details Viewer**: JSON tree view for step configuration and metadata
+6. **Auto-Refresh**: Clusters refresh every 30 seconds
+7. **Search Functionality**: Filter clusters by name, status, or environment
+
+### Key Implementation Patterns
+1. **Modal Architecture**: Nested modals for steps list → step details/duplication
+2. **State Management**: Uses React hooks for all state management
+3. **Error Handling**: Toast notifications for all user actions
+4. **Responsive Design**: Mobile-friendly with Tailwind CSS
+5. **Consistent UI**: Matches SSM service design patterns
 
 ## Recent Additions (SSM Service)
 
@@ -226,3 +271,73 @@ When adding new AWS services (DynamoDB, S3, etc.), follow this pattern:
    - Maintain consistent color scheme and styling
    - Use same toast notification patterns
    - Follow established API response formats
+
+## Service Implementation Guide for S3 and DynamoDB
+
+### S3 Service Requirements
+```
+s3-backend/
+- List buckets with pagination
+- List objects in bucket with prefix support
+- Upload/download objects
+- Delete objects
+- Get object metadata
+- Presigned URLs for secure downloads
+
+s3-frontend/
+- Bucket browser with folder navigation
+- Object upload with drag-and-drop
+- Object preview (images, text files)
+- Batch operations
+- Search within bucket
+```
+
+### DynamoDB Service Requirements
+```
+dynamodb-backend/
+- List tables with pagination
+- Describe table (schema, indexes, metrics)
+- Query/Scan with filters
+- Put/Update/Delete items
+- Batch operations
+- Export table data
+
+dynamodb-frontend/
+- Table browser with pagination
+- Query builder UI
+- Item editor with JSON validation
+- Index selector
+- Metrics dashboard
+```
+
+### Implementation Checklist for New Services
+
+1. **Backend Setup**:
+   - [ ] Create Flask app with URL prefix support
+   - [ ] Add health check endpoint
+   - [ ] Implement pagination for list operations
+   - [ ] Add proper error handling and logging
+   - [ ] Use boto3 with IAM role support
+   - [ ] Create Makefile and Dockerfile
+
+2. **Frontend Setup**:
+   - [ ] Configure homepage in package.json
+   - [ ] Update server routing for ALB
+   - [ ] Create service API client
+   - [ ] Implement main App.js with state management
+   - [ ] Add search and filter functionality
+   - [ ] Include loading states and error handling
+
+3. **Common Patterns**:
+   - [ ] Use modals for detailed views
+   - [ ] Implement toast notifications
+   - [ ] Add pagination component
+   - [ ] Include refresh functionality
+   - [ ] Persist user preferences in localStorage
+
+4. **Testing Checklist**:
+   - [ ] Test ALB routing locally
+   - [ ] Verify pagination edge cases
+   - [ ] Test error scenarios
+   - [ ] Validate IAM permissions
+   - [ ] Check responsive design
