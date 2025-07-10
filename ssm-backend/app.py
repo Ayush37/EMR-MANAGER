@@ -80,8 +80,15 @@ def log_request_info():
     """Log information about incoming requests"""
     app.logger.debug('Headers: %s', request.headers)
     app.logger.info('Request: %s %s', request.method, request.path)
-    if request.get_json():
-        app.logger.debug('Body: %s', request.get_json())
+    
+    # Only try to parse JSON if content-type is application/json
+    if request.content_type and 'application/json' in request.content_type:
+        try:
+            body = request.get_json()
+            if body:
+                app.logger.debug('Body: %s', body)
+        except Exception as e:
+            app.logger.debug('Failed to parse request body: %s', str(e))
 
 @app.after_request
 def log_response_info(response):
