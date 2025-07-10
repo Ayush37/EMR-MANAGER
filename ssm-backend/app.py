@@ -222,25 +222,15 @@ def get_parameter(name):
         if not ssm_client:
             return jsonify({'error': 'AWS client not initialized'}), 500
         
-        # Ensure the parameter starts with /application
+        # Ensure the parameter starts with /
         if not name.startswith('/'):
             name = '/' + name
-        if not name.startswith(PARAMETER_PREFIX):
-            name = PARAMETER_PREFIX + name
         
         try:
-            response = ssm_client.get_parameter(Name=name)
+            response = ssm_client.get_parameter(Name=name, WithDecryption=True)
             param = response['Parameter']
             
-            # Get parameter metadata
-            desc_response = ssm_client.describe_parameters(
-                Filters=[{'Key': 'Name', 'Values': [name]}]
-            )
-            
-            if desc_response['Parameters']:
-                metadata = desc_response['Parameters'][0]
-                param.update(metadata)
-            
+            # Return parameter without additional metadata
             return jsonify({'parameter': format_parameter(param)})
             
         except ClientError as e:
@@ -278,8 +268,6 @@ def create_parameter():
         # Ensure name starts with /application
         if not name.startswith('/'):
             name = '/' + name
-        if not name.startswith(PARAMETER_PREFIX):
-            name = PARAMETER_PREFIX + '/' + name.lstrip('/')
         
         # Validate JSON
         is_valid, error_msg = validate_json(value)
@@ -331,11 +319,9 @@ def update_parameter(name):
         if not value:
             return jsonify({'error': 'Parameter value is required'}), 400
         
-        # Ensure the parameter starts with /application
+        # Ensure the parameter starts with /
         if not name.startswith('/'):
             name = '/' + name
-        if not name.startswith(PARAMETER_PREFIX):
-            name = PARAMETER_PREFIX + name
         
         # Validate JSON
         is_valid, error_msg = validate_json(value)
@@ -378,11 +364,9 @@ def get_parameter_history(name):
         if not ssm_client:
             return jsonify({'error': 'AWS client not initialized'}), 500
         
-        # Ensure the parameter starts with /application
+        # Ensure the parameter starts with /
         if not name.startswith('/'):
             name = '/' + name
-        if not name.startswith(PARAMETER_PREFIX):
-            name = PARAMETER_PREFIX + name
         
         try:
             response = ssm_client.get_parameter_history(
