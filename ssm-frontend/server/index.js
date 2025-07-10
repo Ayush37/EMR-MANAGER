@@ -9,6 +9,11 @@ const PORT = process.env.PORT || 8080;
 app.use('/parameters', express.static(path.join(__dirname, '../client/build')));
 app.use(express.static(path.join(__dirname, '../client/build')));
 
+// Redirect /parameters to /parameters/ for proper routing
+app.get('/parameters', (req, res) => {
+  res.redirect('/parameters/');
+});
+
 // Health check endpoint for monitoring
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
