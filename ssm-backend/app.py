@@ -65,6 +65,55 @@ def format_parameter(param):
         'type': param.get('Type', 'String')
     }
 
+def list_parameters_by_path(path_prefix):
+    """Alternative method to list parameters using get_parameters_by_path"""
+    try:
+        all_parameters = []
+        next_token = None
+        
+        while True:
+            params = {
+                'Path': path_prefix,
+                'Recursive': True,
+                'MaxResults': 10
+            }
+            
+            if next_token:
+                params['NextToken'] = next_token
+            
+            try:
+                response = ssm_client.get_parameters_by_path(**params)
+                
+                for param in response.get('Parameters', []):
+                    # Get parameter metadata
+                    try:
+                        desc_response = ssm_client.describe_parameters(
+                            Filters=[{'Key': 'Name', 'Values': [param['Name']]}]
+                        )
+                        if desc_response['Parameters']:
+                            metadata = desc_response['Parameters'][0]
+                            param.update(metadata)
+                    except:
+                        pass
+                    
+                    all_parameters.append(format_parameter(param))
+                
+                next_token = response.get('NextToken')
+                if not next_token:
+                    break
+                    
+            except ClientError as e:
+                app.logger.error(f'Error in get_parameters_by_path: {str(e)}')
+                if e.response['Error']['Code'] == 'AccessDeniedException':
+                    return jsonify({'error': 'Access denied to parameter store'}), 403
+                return jsonify({'error': str(e)}), 500
+        
+        return jsonify({'parameters': all_parameters})
+        
+    except Exception as e:
+        app.logger.error(f'Unexpected error in list_parameters_by_path: {str(e)}')
+        return jsonify({'error': 'Internal server error'}), 500
+
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
@@ -75,19 +124,28 @@ def health_check():
     })
 
 @app.route('/parameters', methods=['GET'])
-def list_parameters():
-    """List all parameters under /application prefix"""
+@app.route('/parameters/<path:prefix>', methods=['GET'])
+def list_parameters(prefix=None):
+    """List all parameters under specified prefix or /application"""
     try:
         if not ssm_client:
             return jsonify({'error': 'AWS client not initialized'}), 500
+        
+        # Use provided prefix or default to /application
+        path_prefix = f'/{prefix}' if prefix else PARAMETER_PREFIX
         
         all_parameters = []
         next_token = None
         
         while True:
             params = {
-                'Path': PARAMETER_PREFIX,
-                'Recursive': True,
+                'ParameterFilters': [
+                    {
+                        'Key': 'Name',
+                        'Option': 'BeginsWith',
+                        'Values': [path_prefix]
+                    }
+                ],
                 'MaxResults': 50
             }
             
@@ -118,6 +176,9 @@ def list_parameters():
                 app.logger.error(f'Error listing parameters: {str(e)}')
                 if e.response['Error']['Code'] == 'AccessDeniedException':
                     return jsonify({'error': 'Access denied to parameter store'}), 403
+                elif 'ValidationException' in str(e):
+                    # Try alternative method using get_parameters_by_path
+                    return list_parameters_by_path(path_prefix)
                 return jsonify({'error': str(e)}), 500
         
         return jsonify({'parameters': all_parameters})
