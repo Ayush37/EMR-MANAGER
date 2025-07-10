@@ -358,4 +358,11 @@ def internal_error(error):
     return jsonify({'error': 'Internal server error'}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=3700, debug=os.getenv('FLASK_ENV') == 'development')
+    port = int(os.getenv('PORT', 3700))
+    
+    if os.getenv('FLASK_ENV') == 'development':
+        app.run(host='0.0.0.0', port=port, debug=True)
+    else:
+        from waitress import serve
+        app.logger.info(f'Starting SSM Backend service with Waitress on port {port}')
+        serve(app, host='0.0.0.0', port=port)
