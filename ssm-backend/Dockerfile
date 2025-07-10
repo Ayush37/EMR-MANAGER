@@ -31,4 +31,4 @@ RUN chown -R jpmcnobody:jpmcnobody /app/ \
 EXPOSE $PORT
 
 # Start the application using waitress
-CMD waitress-serve --host=0.0.0.0 --port=$PORT ssm_parameter_manager.app:app
+CMD waitress-serve --host=0.0.0.0 --port=$PORT app:app
