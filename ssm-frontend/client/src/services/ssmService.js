@@ -11,7 +11,7 @@ class SSMService {
 
   async listParameters() {
     try {
-      const response = await fetch(`${API_BASE_URL}/parameters`, {
+      const response = await fetch(`${API_BASE_URL}/allparameters`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -26,7 +26,7 @@ class SSMService {
 
   async getParameter(name) {
     try {
-      const response = await fetch(`${API_BASE_URL}/parameters/${encodeURIComponent(name)}`, {
+      const response = await fetch(`${API_BASE_URL}/parameter/${encodeURIComponent(name)}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -57,7 +57,7 @@ class SSMService {
 
   async updateParameter(name, value, description = '') {
     try {
-      const response = await fetch(`${API_BASE_URL}/parameters/${encodeURIComponent(name)}`, {
+      const response = await fetch(`${API_BASE_URL}/parameter/${encodeURIComponent(name)}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -73,7 +73,7 @@ class SSMService {
 
   async getParameterHistory(name) {
     try {
-      const response = await fetch(`${API_BASE_URL}/parameters/${encodeURIComponent(name)}/history`, {
+      const response = await fetch(`${API_BASE_URL}/parameter/${encodeURIComponent(name)}/history`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',

@@ -123,8 +123,8 @@ def health_check():
         'timestamp': datetime.now().isoformat()
     })
 
-@app.route('/parameters', methods=['GET'])
-@app.route('/parameters/<path:prefix>', methods=['GET'])
+@app.route('/allparameters', methods=['GET'])
+@app.route('/allparameters/<path:prefix>', methods=['GET'])
 def list_parameters(prefix=None):
     """List all parameters under specified prefix or /application"""
     try:
@@ -187,7 +187,7 @@ def list_parameters(prefix=None):
         app.logger.error(f'Unexpected error in list_parameters: {str(e)}')
         return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/parameters/<path:name>', methods=['GET'])
+@app.route('/parameter/<path:name>', methods=['GET'])
 def get_parameter(name):
     """Get a specific parameter by name"""
     try:
@@ -286,7 +286,7 @@ def create_parameter():
         app.logger.error(f'Unexpected error in create_parameter: {str(e)}')
         return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/parameters/<path:name>', methods=['PUT'])
+@app.route('/parameter/<path:name>', methods=['PUT'])
 def update_parameter(name):
     """Update an existing parameter"""
     try:
@@ -343,7 +343,7 @@ def update_parameter(name):
         app.logger.error(f'Unexpected error in update_parameter: {str(e)}')
         return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/parameters/<path:name>/history', methods=['GET'])
+@app.route('/parameter/<path:name>/history', methods=['GET'])
 def get_parameter_history(name):
     """Get parameter history (last 5 versions)"""
     try:
