@@ -1,71 +1,86 @@
-# app.py
+#!/usr/bin/env python3
+import os
+import json
+import logging
+from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import boto3
-import json
-import os
-import logging
-from logging.handlers import RotatingFileHandler
-from datetime import datetime
+from botocore.exceptions import ClientError, BotoCoreError
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Configure logging to file
-log_dir = 'logs'
-if not os.path.exists(log_dir):
-    os.makedirs(log_dir)
-
-log_file = os.path.join(log_dir, 'app.log')
-
-# Create a handler for rotating log files (10 MB max, keep 5 backup files)
-handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)
-handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-
-# Configure the logger
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-logger.addHandler(handler)
-
-# Remove default handlers to prevent console output
-logger.propagate = False
-
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+CORS(app)
 
 # Configure URL prefix for ALB routing
-# If URL_PREFIX env var is not set, default to '/api'
-# If it's set to empty string (for local dev), use empty string
-URL_PREFIX = os.getenv('URL_PREFIX')
-if URL_PREFIX is None:
-    URL_PREFIX = '/api'
+URL_PREFIX = os.getenv('URL_PREFIX', '/api')
 
-# Configure AWS services
-# Initialize AWS clients with automatic credential detection
+# Configure logging
+log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
+
+# Set up root logger
+logging.basicConfig(
+    level=getattr(logging, log_level),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# Configure Flask app logger
+app.app.logger.setLevel(getattr(logging, log_level))
+
+# Add console handler for CloudWatch
+console_handler = logging.StreamHandler()
+console_handler.setLevel(getattr(logging, log_level))
+console_handler.setFormatter(logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+))
+app.app.logger.addHandler(console_handler)
+
+# Add file handler as backup
+log_dir = 'logs'
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, 'emr-backend.log')
+
+file_handler = RotatingFileHandler(log_file, maxBytes=10485760, backupCount=5)
+file_handler.setLevel(getattr(logging, log_level))
+file_handler.setFormatter(logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s [in %(pathname)s:%(lineno)d]'
+))
+app.app.logger.addHandler(file_handler)
+
+# Log startup
+app.app.logger.info(f'EMR Backend service started with log level: {log_level}')
+
+# AWS Configuration
 AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
 
+# Initialize AWS clients
 try:
-    # Check if running in ECS/Lambda (AWS_EXECUTION_ENV is set) or if IAM role is explicitly requested
+    # Check if running in ECS/Lambda (AWS_EXECUTION_ENV is set) or if profile is explicitly disabled
     if os.getenv('AWS_EXECUTION_ENV') or os.getenv('USE_IAM_ROLE', 'false').lower() == 'true':
         # Use IAM role credentials (for ECS/Lambda)
         session = boto3.Session(region_name=AWS_REGION)
-        logger.info('AWS session initialized with IAM role credentials')
+        ssm = session.client('ssm')
+        emr = session.client('emr')
+        lambda_client = session.client('lambda')
+        app.app.logger.info('AWS session initialized with IAM role credentials')
     else:
         # Use profile for local development
         AWS_PROFILE = os.getenv('AWS_PROFILE', 'adfsjit')
         session = boto3.Session(profile_name=AWS_PROFILE, region_name=AWS_REGION)
-        logger.info(f'AWS session initialized with profile: {AWS_PROFILE}')
-    
-    # Initialize service clients
-    ssm = session.client('ssm')
-    emr = session.client('emr')
-    lambda_client = session.client('lambda')
-    
+        ssm = session.client('ssm')
+        emr = session.client('emr')
+        lambda_client = session.client('lambda')
+        app.app.logger.info(f'AWS session initialized with profile: {AWS_PROFILE}')
 except Exception as e:
-    logger.error(f'Failed to initialize AWS session: {str(e)}')
-    raise
+    app.app.logger.error(f'Failed to initialize AWS session: {str(e)}')
+    ssm = None
+    emr = None
+    lambda_client = None
 
 # Constants for multiple environments
 PARAM_STORE_PATHS = {
@@ -80,11 +95,36 @@ LAMBDA_FUNCTION_NAMES = {
     'uat3': "app-job_submit_lambda_uat3"
 }
 
+# Request logging middleware
+@app.before_request
+def log_request_info():
+    """Log information about incoming requests"""
+    app.app.logger.debug('Headers: %s', request.headers)
+    app.app.logger.info('Request: %s %s', request.method, request.path)
+    
+    # Only try to parse JSON if content-type is application/json
+    if request.content_type and 'application/json' in request.content_type:
+        try:
+            body = request.get_json()
+            if body:
+                app.app.logger.debug('Body: %s', body)
+        except Exception as e:
+            app.app.logger.debug('Failed to parse request body: %s', str(e))
+
+@app.after_request
+def log_response_info(response):
+    """Log information about outgoing responses"""
+    app.app.logger.info('Response: %s %s - Status: %s', 
+                    request.method, 
+                    request.path, 
+                    response.status_code)
+    return response
+
 @app.route(f'{URL_PREFIX}/clusters', methods=['GET'])
 def get_clusters():
     """Fetch all clusters from Parameter Store and their current states with pagination"""
     try:
-        logger.debug("Fetching clusters data")
+        app.app.logger.debug("Fetching clusters data")
         
         # Get pagination parameters
         page = int(request.args.get('page', 1))
@@ -110,15 +150,15 @@ def get_clusters():
             for config in cluster_configs:
                 config['environment'] = environment.upper()
         
-        logger.debug(f"Retrieved {len(cluster_configs)} cluster configs")
+        app.logger.debug(f"Retrieved {len(cluster_configs)} cluster configs")
         
         # Get current EMR cluster states
         emr_clusters = list_emr_clusters()
-        logger.debug(f"Retrieved {len(emr_clusters)} EMR clusters")
+        app.logger.debug(f"Retrieved {len(emr_clusters)} EMR clusters")
         
         # Merge the data
         merged_clusters = map_cluster_states(cluster_configs, emr_clusters)
-        logger.debug(f"Merged data for {len(merged_clusters)} clusters")
+        app.logger.debug(f"Merged data for {len(merged_clusters)} clusters")
         
         # Apply pagination
         total_count = len(merged_clusters)
@@ -138,14 +178,14 @@ def get_clusters():
             }
         })
     except Exception as e:
-        logger.error(f"Error in get_clusters: {str(e)}", exc_info=True)
+        app.logger.error(f"Error in get_clusters: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route(f'{URL_PREFIX}/clusters/<n>', methods=['GET'])
 def get_cluster(name):
     """Get details for a specific cluster"""
     try:
-        logger.debug(f"Fetching details for cluster: {name}")
+        app.logger.debug(f"Fetching details for cluster: {name}")
             
         # Get cluster configurations
         cluster_configs = get_cluster_configs()
@@ -155,20 +195,20 @@ def get_cluster(name):
         # Find the specific cluster
         cluster = next((c for c in merged_clusters if c['name'] == name), None)
         if not cluster:
-            logger.warning(f"Cluster not found: {name}")
+            app.logger.warning(f"Cluster not found: {name}")
             return jsonify({"error": f"Cluster {name} not found"}), 404
 
-        logger.debug(f"Successfully fetched details for cluster: {name}")
+        app.logger.debug(f"Successfully fetched details for cluster: {name}")
         return jsonify(cluster)
     except Exception as e:
-        logger.error(f"Error in get_cluster: {str(e)}", exc_info=True)
+        app.logger.error(f"Error in get_cluster: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route(f'{URL_PREFIX}/clusters/<n>/start', methods=['POST'])
 def start_cluster(name):
     """Start a specific EMR cluster"""
     try:
-        logger.debug(f"Request to start cluster: {name}")
+        app.logger.debug(f"Request to start cluster: {name}")
         
         # Get environment from request body or determine from cluster name
         data = request.json or {}
@@ -189,7 +229,7 @@ def start_cluster(name):
             "httpMethod": "POST"
         }
 
-        logger.debug(f"Invoking Lambda {lambda_function_name} to start cluster: {name}")
+        app.logger.debug(f"Invoking Lambda {lambda_function_name} to start cluster: {name}")
         response = lambda_client.invoke(
             FunctionName=lambda_function_name,
             Payload=json.dumps(payload)
@@ -197,17 +237,17 @@ def start_cluster(name):
 
         # Parse the Lambda response
         response_payload = json.loads(response['Payload'].read().decode())
-        logger.debug(f"Lambda response for starting cluster {name}: {response_payload}")
+        app.logger.debug(f"Lambda response for starting cluster {name}: {response_payload}")
         return jsonify(response_payload)
     except Exception as e:
-        logger.error(f"Error starting cluster {name}: {str(e)}", exc_info=True)
+        app.logger.error(f"Error starting cluster {name}: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route(f'{URL_PREFIX}/clusters/<n>/terminate', methods=['POST'])
 def terminate_cluster(name):
     """Terminate a specific EMR cluster"""
     try:
-        logger.debug(f"Request to terminate cluster: {name}")
+        app.logger.debug(f"Request to terminate cluster: {name}")
         
         # Get environment from request body or determine from cluster name
         data = request.json or {}
@@ -229,7 +269,7 @@ def terminate_cluster(name):
             "httpMethod": "DELETE"
         }
 
-        logger.debug(f"Invoking Lambda {lambda_function_name} to terminate cluster: {name}")
+        app.logger.debug(f"Invoking Lambda {lambda_function_name} to terminate cluster: {name}")
         response = lambda_client.invoke(
             FunctionName=lambda_function_name,
             Payload=json.dumps(payload)
@@ -237,17 +277,17 @@ def terminate_cluster(name):
 
         # Parse the Lambda response
         response_payload = json.loads(response['Payload'].read().decode())
-        logger.debug(f"Lambda response for terminating cluster {name}: {response_payload}")
+        app.logger.debug(f"Lambda response for terminating cluster {name}: {response_payload}")
         return jsonify(response_payload)
     except Exception as e:
-        logger.error(f"Error terminating cluster {name}: {str(e)}", exc_info=True)
+        app.logger.error(f"Error terminating cluster {name}: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route(f'{URL_PREFIX}/clusters/<cluster_id>/steps', methods=['GET'])
 def get_cluster_steps(cluster_id):
     """Get all steps for a specific cluster with pagination"""
     try:
-        logger.debug(f"Fetching steps for cluster: {cluster_id}")
+        app.logger.debug(f"Fetching steps for cluster: {cluster_id}")
         
         # Get pagination parameters
         page = int(request.args.get('page', 1))
@@ -295,7 +335,7 @@ def get_cluster_steps(cluster_id):
                     'config': step_detail.get('Config', {})
                 })
             except Exception as e:
-                logger.error(f"Error getting step details for {step['Id']}: {str(e)}")
+                app.logger.error(f"Error getting step details for {step['Id']}: {str(e)}")
                 detailed_steps.append({
                     'id': step['Id'],
                     'name': step['Name'],
@@ -322,14 +362,14 @@ def get_cluster_steps(cluster_id):
         })
         
     except Exception as e:
-        logger.error(f"Error fetching steps for cluster {cluster_id}: {str(e)}", exc_info=True)
+        app.logger.error(f"Error fetching steps for cluster {cluster_id}: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route(f'{URL_PREFIX}/clusters/<cluster_id>/steps/<step_id>', methods=['GET'])
 def get_step_details(cluster_id, step_id):
     """Get detailed information for a specific step"""
     try:
-        logger.debug(f"Fetching step details for step {step_id} in cluster {cluster_id}")
+        app.logger.debug(f"Fetching step details for step {step_id} in cluster {cluster_id}")
         
         response = emr.describe_step(
             ClusterId=cluster_id,
@@ -356,14 +396,14 @@ def get_step_details(cluster_id, step_id):
         })
         
     except Exception as e:
-        logger.error(f"Error fetching step details: {str(e)}", exc_info=True)
+        app.logger.error(f"Error fetching step details: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route(f'{URL_PREFIX}/clusters/<cluster_id>/steps', methods=['POST'])
 def add_step(cluster_id):
     """Add a new step to a cluster (duplicate an existing step)"""
     try:
-        logger.debug(f"Adding step to cluster: {cluster_id}")
+        app.logger.debug(f"Adding step to cluster: {cluster_id}")
         
         data = request.json
         if not data:
@@ -383,7 +423,7 @@ def add_step(cluster_id):
         )
         
         step_ids = response.get('StepIds', [])
-        logger.debug(f"Successfully added step(s): {step_ids}")
+        app.logger.debug(f"Successfully added step(s): {step_ids}")
         
         return jsonify({
             'stepIds': step_ids,
@@ -391,14 +431,14 @@ def add_step(cluster_id):
         })
         
     except Exception as e:
-        logger.error(f"Error adding step: {str(e)}", exc_info=True)
+        app.logger.error(f"Error adding step: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route(f'{URL_PREFIX}/clusters/<cluster_id>/steps/<step_id>/cancel', methods=['POST'])
 def cancel_step(cluster_id, step_id):
     """Cancel a running step"""
     try:
-        logger.debug(f"Cancelling step {step_id} in cluster {cluster_id}")
+        app.logger.debug(f"Cancelling step {step_id} in cluster {cluster_id}")
         
         # First check if the step is in a cancellable state
         step_response = emr.describe_step(
@@ -426,7 +466,7 @@ def cancel_step(cluster_id, step_id):
         })
         
     except Exception as e:
-        logger.error(f"Error cancelling step: {str(e)}", exc_info=True)
+        app.logger.error(f"Error cancelling step: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route(f'{URL_PREFIX}/health', methods=['GET'])
@@ -442,7 +482,7 @@ def health_check():
 def get_cluster_configs(environment='uat1'):
     """Fetches all EMR cluster configurations from Parameter Store for a specific environment"""
     param_store_path = PARAM_STORE_PATHS.get(environment, PARAM_STORE_PATHS['uat1'])
-    logger.debug(f"Fetching cluster configs from Parameter Store at path: {param_store_path}")
+    app.logger.debug(f"Fetching cluster configs from Parameter Store at path: {param_store_path}")
     
     params = []
     next_token = None
@@ -457,15 +497,15 @@ def get_cluster_configs(environment='uat1'):
             if next_token:
                 kwargs['NextToken'] = next_token
 
-            logger.debug(f"Calling get_parameters_by_path with: {kwargs}")
+            app.logger.debug(f"Calling get_parameters_by_path with: {kwargs}")
             response = ssm.get_parameters_by_path(**kwargs)
             
             parameters = response.get('Parameters', [])
-            logger.debug(f"Received {len(parameters)} parameters")
+            app.logger.debug(f"Received {len(parameters)} parameters")
             
             # Log each parameter name
             for param in parameters:
-                logger.debug(f"Parameter found: {param['Name']}")
+                app.logger.debug(f"Parameter found: {param['Name']}")
                 
             params.extend(parameters)
 
@@ -481,9 +521,9 @@ def get_cluster_configs(environment='uat1'):
             if "STRESS" not in cluster_name:
                 try:
                     config = json.loads(param['Value'])
-                    logger.debug(f"Successfully parsed JSON for: {cluster_name}")
+                    app.logger.debug(f"Successfully parsed JSON for: {cluster_name}")
                 except json.JSONDecodeError:
-                    logger.warning(f"Could not parse parameter value as JSON for: {cluster_name}")
+                    app.logger.warning(f"Could not parse parameter value as JSON for: {cluster_name}")
                     config = {"rawValue": param['Value']}
 
                 # Convert datetime objects to ISO format strings for JSON serialization
@@ -497,38 +537,38 @@ def get_cluster_configs(environment='uat1'):
                     "parameterName": param['Name'],
                     "lastModified": last_modified
                 })
-                logger.debug(f"Added cluster config: {cluster_name}")
+                app.logger.debug(f"Added cluster config: {cluster_name}")
 
-        logger.debug(f"Processed {len(cluster_configs)} cluster configurations")
+        app.logger.debug(f"Processed {len(cluster_configs)} cluster configurations")
         return cluster_configs
     except Exception as e:
-        logger.error(f"Error fetching cluster configs: {str(e)}", exc_info=True)
+        app.logger.error(f"Error fetching cluster configs: {str(e)}", exc_info=True)
         return []
 
 def list_emr_clusters():
     """Fetches the current state of all EMR clusters"""
-    logger.debug("Fetching EMR clusters")
+    app.logger.debug("Fetching EMR clusters")
     states = ["STARTING", "BOOTSTRAPPING", "RUNNING", "WAITING", "TERMINATING", "TERMINATED", "TERMINATED_WITH_ERRORS"]
     try:
         response = emr.list_clusters(ClusterStates=states)
         clusters = response.get('Clusters', [])
-        logger.debug(f"Found {len(clusters)} EMR clusters")
+        app.logger.debug(f"Found {len(clusters)} EMR clusters")
         
         # Log each cluster name
         for cluster in clusters:
-            logger.debug(f"EMR Cluster: {cluster['Name']} - State: {cluster['Status']['State']}")
+            app.logger.debug(f"EMR Cluster: {cluster['Name']} - State: {cluster['Status']['State']}")
             
         return clusters
     except Exception as e:
-        logger.error(f"Error listing EMR clusters: {str(e)}", exc_info=True)
+        app.logger.error(f"Error listing EMR clusters: {str(e)}", exc_info=True)
         return []
 
 def map_cluster_states(cluster_configs, emr_clusters):
     """Maps cluster name to its state by finding the corresponding clusterID"""
-    logger.debug("Mapping cluster states")
+    app.logger.debug("Mapping cluster states")
     result = []
     for config in cluster_configs:
-        logger.debug(f"Processing config for: {config['name']}")
+        app.logger.debug(f"Processing config for: {config['name']}")
         
         # Find matching EMR cluster by name
         matching_cluster = next(
@@ -538,9 +578,9 @@ def map_cluster_states(cluster_configs, emr_clusters):
         )
 
         if matching_cluster:
-            logger.debug(f"Found matching EMR cluster: {matching_cluster['Name']} - ID: {matching_cluster['Id']}")
+            app.logger.debug(f"Found matching EMR cluster: {matching_cluster['Name']} - ID: {matching_cluster['Id']}")
         else:
-            logger.debug(f"No matching EMR cluster found for: {config['name']}")
+            app.logger.debug(f"No matching EMR cluster found for: {config['name']}")
 
         # For serialization, ensure all datetime objects are converted to strings
         timeline = None
@@ -562,23 +602,13 @@ def map_cluster_states(cluster_configs, emr_clusters):
             "tags": matching_cluster.get('Tags', []) if matching_cluster else []
         }
         result.append(merged_info)
-        logger.debug(f"Completed mapping for cluster: {config['name']}")
+        app.logger.debug(f"Completed mapping for cluster: {config['name']}")
 
     return result
 
-# Configure Flask logging to file too
-if not app.debug:
-    file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)
-    file_handler.setFormatter(logging.Formatter(
-        '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
-    ))
-    file_handler.setLevel(logging.INFO)
-    app.logger.addHandler(file_handler)
-    app.logger.setLevel(logging.INFO)
-    app.logger.info('EMR Cluster Manager startup')
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 3700))
-    print(f"Starting server on port {port}. Logs will be written to {log_file}")
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.logger.info(f"Starting EMR Backend server on port {port}")
+    app.run(host='0.0.0.0', port=port, debug=False)
 
