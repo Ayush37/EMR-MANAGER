@@ -171,6 +171,48 @@ npm start
 5. Frontend uses ESLint through Create React App defaults
 6. Build wheel packages with `make ci` for deployment
 
+## Local Development Setup
+
+### EMR Service
+1. **Backend** (Terminal 1):
+   ```bash
+   cd emr-backend
+   # For local development, remove the /api prefix
+   echo "URL_PREFIX=" > .env
+   pip install -r requirements.txt
+   python app.py  # Runs on port 3700
+   ```
+
+2. **Frontend** (Terminal 2):
+   ```bash
+   cd emr-frontend/client
+   # Point to local backend
+   echo "REACT_APP_API_URL=http://localhost:3700" > .env
+   npm install
+   npm start  # Runs on port 3000
+   ```
+
+### SSM Service
+1. **Backend** (Terminal 1):
+   ```bash
+   cd ssm-backend
+   # For local development, remove the /ssm-api prefix
+   echo "URL_PREFIX=" > .env
+   pip install -r requirements.txt
+   python app.py  # Runs on port 3700
+   ```
+
+2. **Frontend** (Terminal 2):
+   ```bash
+   cd ssm-frontend/client
+   # Point to local backend
+   echo "REACT_APP_API_URL=http://localhost:3700" > .env
+   npm install
+   npm start  # Runs on port 3000
+   ```
+
+**Note**: The `.env` files are gitignored and should not be committed. In production, the URL_PREFIX defaults to the correct values for ALB routing.
+
 ## Deployment
 
 The project uses Docker for containerization:

@@ -7,6 +7,10 @@ import os
 import logging
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging to file
 log_dir = 'logs'
