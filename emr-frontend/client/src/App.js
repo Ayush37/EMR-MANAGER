@@ -58,15 +58,6 @@ function App() {
     fetchClusters(currentPage);
   }, [currentPage, environment, fetchClusters]);
 
-  // Auto-refresh clusters every 30 seconds
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchClusters(currentPage);
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, [currentPage, environment, fetchClusters]);
-
   // Persist environment selection
   useEffect(() => {
     localStorage.setItem('emr-environment', environment);

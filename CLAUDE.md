@@ -119,7 +119,7 @@ npm start
 ## Important Implementation Notes
 
 1. **No Direct AWS Access from Frontend**: All AWS operations are proxied through the Python backend for security
-2. **Polling Mechanism**: EMR frontend auto-refreshes every 30 seconds
+2. **Manual Refresh**: EMR frontend has a refresh button for updating cluster status
 3. **Cluster Filtering**: Clusters with "STRESS" in their name are automatically filtered out
 4. **Logging**: Backend implements file-based logging with rotation in the `logs/` directory
 5. **CORS**: Backend has CORS enabled for frontend communication
@@ -246,7 +246,7 @@ The project uses Docker for containerization:
 3. **Cluster Steps Modal**: View all steps for a cluster with pagination
 4. **Step Management**: Duplicate steps with edit capability, cancel running steps
 5. **Step Details Viewer**: JSON tree view for step configuration and metadata
-6. **Auto-Refresh**: Clusters refresh every 30 seconds
+6. **Manual Refresh**: Users can refresh clusters using the refresh button
 7. **Search Functionality**: Filter clusters by name, status, or environment
 
 ### Key Implementation Patterns
