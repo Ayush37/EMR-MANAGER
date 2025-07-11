@@ -10,6 +10,7 @@ flask = "^2.0.0"
 flask-cors = "^3.0.10"
 boto3 = "^1.24.0"
 waitress = "^2.1.2"
+python-dotenv = "^1.0.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^7.0.0"
