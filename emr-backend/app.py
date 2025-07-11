@@ -36,7 +36,11 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 # Configure URL prefix for ALB routing
-URL_PREFIX = os.getenv('URL_PREFIX', '/api')
+# If URL_PREFIX env var is not set, default to '/api'
+# If it's set to empty string (for local dev), use empty string
+URL_PREFIX = os.getenv('URL_PREFIX')
+if URL_PREFIX is None:
+    URL_PREFIX = '/api'
 
 # Configure AWS services
 # This will use the credentials from ~/.aws/credentials
