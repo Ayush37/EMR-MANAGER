@@ -19,7 +19,7 @@ function App() {
   
   // Environment filter with localStorage persistence
   const [environment, setEnvironment] = useState(() => {
-    return localStorage.getItem('emr-environment') || 'uat1';
+    return localStorage.getItem('emr-environment') || 'all';
   });
   
   // Pagination state
@@ -72,11 +72,10 @@ function App() {
     localStorage.setItem('emr-environment', environment);
   }, [environment]);
 
-  // Filter clusters based on search term
+  // Filter clusters based on search term only (environment filtering is done by backend)
   const filteredClusters = clusters.filter(cluster => 
     cluster.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    cluster.state.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    cluster.environment.toLowerCase().includes(searchTerm.toLowerCase())
+    cluster.state.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const handleClusterClick = (cluster) => {
