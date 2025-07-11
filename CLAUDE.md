@@ -100,7 +100,7 @@ npm start
 ## AWS Integration Details
 
 ### EMR Service
-- **AWS Profile**: The backend uses the hardcoded profile `adfsjit`
+- **AWS Credentials**: Automatically uses IAM roles in ECS, falls back to profile for local development
 - **Parameter Store Paths**: 
   - UAT1: `/application/ecdp-config/uat1/EMR-BASE/`
   - UAT2: `/application/ecdp-config/uat2/EMR-BASE/`
@@ -112,7 +112,7 @@ npm start
 - **Required Permissions**: SSM Parameter Store read, EMR operations (ListClusters, DescribeCluster, ListSteps, DescribeStep, AddJobFlowSteps, CancelSteps), Lambda invoke
 
 ### SSM Service
-- **AWS Profile**: Same as above
+- **AWS Credentials**: Automatically uses IAM roles in ECS, falls back to profile for local development
 - **Parameter Store Path**: Can browse any path
 - **Required Permissions**: GetParameters, GetParametersHistory, GetParametersByPath, GetParameter, PutParameter (WriteParameterStore)
 

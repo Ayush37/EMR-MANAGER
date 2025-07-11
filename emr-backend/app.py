@@ -43,11 +43,29 @@ if URL_PREFIX is None:
     URL_PREFIX = '/api'
 
 # Configure AWS services
-# This will use the credentials from ~/.aws/credentials
-session = boto3.Session(profile_name='adfsjit')
-ssm = session.client('ssm')
-emr = session.client('emr')
-lambda_client = session.client('lambda')
+# Initialize AWS clients with automatic credential detection
+AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
+
+try:
+    # Check if running in ECS/Lambda (AWS_EXECUTION_ENV is set) or if IAM role is explicitly requested
+    if os.getenv('AWS_EXECUTION_ENV') or os.getenv('USE_IAM_ROLE', 'false').lower() == 'true':
+        # Use IAM role credentials (for ECS/Lambda)
+        session = boto3.Session(region_name=AWS_REGION)
+        logger.info('AWS session initialized with IAM role credentials')
+    else:
+        # Use profile for local development
+        AWS_PROFILE = os.getenv('AWS_PROFILE', 'adfsjit')
+        session = boto3.Session(profile_name=AWS_PROFILE, region_name=AWS_REGION)
+        logger.info(f'AWS session initialized with profile: {AWS_PROFILE}')
+    
+    # Initialize service clients
+    ssm = session.client('ssm')
+    emr = session.client('emr')
+    lambda_client = session.client('lambda')
+    
+except Exception as e:
+    logger.error(f'Failed to initialize AWS session: {str(e)}')
+    raise
 
 # Constants for multiple environments
 PARAM_STORE_PATHS = {
