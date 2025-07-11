@@ -30,7 +30,7 @@ logging.basicConfig(
 )
 
 # Configure Flask app logger
-app.app.logger.setLevel(getattr(logging, log_level))
+app.logger.setLevel(getattr(logging, log_level))
 
 # Add console handler for CloudWatch
 console_handler = logging.StreamHandler()
@@ -38,7 +38,7 @@ console_handler.setLevel(getattr(logging, log_level))
 console_handler.setFormatter(logging.Formatter(
     '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 ))
-app.app.logger.addHandler(console_handler)
+app.logger.addHandler(console_handler)
 
 # Add file handler as backup
 log_dir = 'logs'
@@ -50,10 +50,10 @@ file_handler.setLevel(getattr(logging, log_level))
 file_handler.setFormatter(logging.Formatter(
     '%(asctime)s - %(name)s - %(levelname)s - %(message)s [in %(pathname)s:%(lineno)d]'
 ))
-app.app.logger.addHandler(file_handler)
+app.logger.addHandler(file_handler)
 
 # Log startup
-app.app.logger.info(f'EMR Backend service started with log level: {log_level}')
+app.logger.info(f'EMR Backend service started with log level: {log_level}')
 
 # AWS Configuration
 AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
@@ -67,7 +67,7 @@ try:
         ssm = session.client('ssm')
         emr = session.client('emr')
         lambda_client = session.client('lambda')
-        app.app.logger.info('AWS session initialized with IAM role credentials')
+        app.logger.info('AWS session initialized with IAM role credentials')
     else:
         # Use profile for local development
         AWS_PROFILE = os.getenv('AWS_PROFILE', 'adfsjit')
@@ -75,9 +75,9 @@ try:
         ssm = session.client('ssm')
         emr = session.client('emr')
         lambda_client = session.client('lambda')
-        app.app.logger.info(f'AWS session initialized with profile: {AWS_PROFILE}')
+        app.logger.info(f'AWS session initialized with profile: {AWS_PROFILE}')
 except Exception as e:
-    app.app.logger.error(f'Failed to initialize AWS session: {str(e)}')
+    app.logger.error(f'Failed to initialize AWS session: {str(e)}')
     ssm = None
     emr = None
     lambda_client = None
@@ -99,22 +99,22 @@ LAMBDA_FUNCTION_NAMES = {
 @app.before_request
 def log_request_info():
     """Log information about incoming requests"""
-    app.app.logger.debug('Headers: %s', request.headers)
-    app.app.logger.info('Request: %s %s', request.method, request.path)
+    app.logger.debug('Headers: %s', request.headers)
+    app.logger.info('Request: %s %s', request.method, request.path)
     
     # Only try to parse JSON if content-type is application/json
     if request.content_type and 'application/json' in request.content_type:
         try:
             body = request.get_json()
             if body:
-                app.app.logger.debug('Body: %s', body)
+                app.logger.debug('Body: %s', body)
         except Exception as e:
-            app.app.logger.debug('Failed to parse request body: %s', str(e))
+            app.logger.debug('Failed to parse request body: %s', str(e))
 
 @app.after_request
 def log_response_info(response):
     """Log information about outgoing responses"""
-    app.app.logger.info('Response: %s %s - Status: %s', 
+    app.logger.info('Response: %s %s - Status: %s', 
                     request.method, 
                     request.path, 
                     response.status_code)
@@ -124,7 +124,7 @@ def log_response_info(response):
 def get_clusters():
     """Fetch all clusters from Parameter Store and their current states with pagination"""
     try:
-        app.app.logger.debug("Fetching clusters data")
+        app.logger.debug("Fetching clusters data")
         
         # Get pagination parameters
         page = int(request.args.get('page', 1))
