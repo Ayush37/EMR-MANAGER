@@ -478,6 +478,15 @@ def health_check():
         'timestamp': datetime.now().isoformat()
     })
 
+@app.route('/health', methods=['GET'])
+def health_check_root():
+    """Health check endpoint at root for ECS/ALB health checks"""
+    return jsonify({
+        'status': 'healthy',
+        'service': 'emr-backend',
+        'timestamp': datetime.now().isoformat()
+    })
+
 # Helper functions
 def get_cluster_configs(environment='uat1'):
     """Fetches all EMR cluster configurations from Parameter Store for a specific environment"""
