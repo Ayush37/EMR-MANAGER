@@ -181,7 +181,7 @@ def get_clusters():
         app.logger.error(f"Error in get_clusters: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-@app.route(f'{URL_PREFIX}/clusters/<n>', methods=['GET'])
+@app.route(f'{URL_PREFIX}/clusters/<name>', methods=['GET'])
 def get_cluster(name):
     """Get details for a specific cluster"""
     try:
@@ -204,7 +204,7 @@ def get_cluster(name):
         app.logger.error(f"Error in get_cluster: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-@app.route(f'{URL_PREFIX}/clusters/<n>/start', methods=['POST'])
+@app.route(f'{URL_PREFIX}/clusters/<name>/start', methods=['POST'])
 def start_cluster(name):
     """Start a specific EMR cluster"""
     try:
@@ -243,7 +243,7 @@ def start_cluster(name):
         app.logger.error(f"Error starting cluster {name}: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-@app.route(f'{URL_PREFIX}/clusters/<n>/terminate', methods=['POST'])
+@app.route(f'{URL_PREFIX}/clusters/<name>/terminate', methods=['POST'])
 def terminate_cluster(name):
     """Terminate a specific EMR cluster"""
     try:
