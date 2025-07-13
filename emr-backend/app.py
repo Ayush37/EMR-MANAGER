@@ -577,12 +577,17 @@ def get_step_logs(cluster_id, step_id):
             if not container_id:
                 return jsonify({"error": "Container ID required for container logs"}), 400
             
-            # Extract application ID from container ID if needed
-            app_id_match = re.match(r'(application_\d+_\d+)', container_id)
-            if not app_id_match:
-                return jsonify({"error": "Invalid container ID format"}), 400
-                
-            application_id = app_id_match.group(1)
+            # Get application ID from request params or derive from container ID
+            application_id = request.args.get('applicationId')
+            
+            if not application_id:
+                # Try to extract from container ID format: container_e02_1234567890_0001_01_000001
+                # The application ID would be application_1234567890_0001
+                container_match = re.match(r'container_[^_]+_(\d+)_(\d+)_\d+_\d+', container_id)
+                if container_match:
+                    application_id = f"application_{container_match.group(1)}_{container_match.group(2)}"
+                else:
+                    return jsonify({"error": "Could not determine application ID from container ID"}), 400
             container_log_prefix = f"logs/{cluster_id}/containers/{application_id}/{container_id}"
             
             log_files = {
@@ -737,11 +742,16 @@ def download_step_logs(cluster_id, step_id):
             if not container_id:
                 return jsonify({"error": "Container ID required"}), 400
                 
-            app_id_match = re.match(r'(application_\d+_\d+)', container_id)
-            if not app_id_match:
-                return jsonify({"error": "Invalid container ID"}), 400
-                
-            application_id = app_id_match.group(1)
+            # Get application ID from request params or derive from container ID
+            application_id = request.args.get('applicationId')
+            
+            if not application_id:
+                # Try to extract from container ID format: container_e02_1234567890_0001_01_000001
+                container_match = re.match(r'container_[^_]+_(\d+)_(\d+)_\d+_\d+', container_id)
+                if container_match:
+                    application_id = f"application_{container_match.group(1)}_{container_match.group(2)}"
+                else:
+                    return jsonify({"error": "Could not determine application ID"}), 400
             # Add .gz extension for stderr
             if log_file == 'stderr':
                 s3_key = f"logs/{cluster_id}/containers/{application_id}/{container_id}/{log_file}.gz"

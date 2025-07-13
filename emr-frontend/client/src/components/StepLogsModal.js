@@ -67,6 +67,9 @@ const StepLogsModal = ({ cluster, step, onClose }) => {
       
       if (logType === 'container' && selectedContainer) {
         params.container = selectedContainer.id;
+        if (applicationId) {
+          params.applicationId = applicationId;
+        }
       }
       
       const response = await emrService.getStepLogs(cluster.clusterId, step.id, params);
@@ -142,6 +145,9 @@ const StepLogsModal = ({ cluster, step, onClose }) => {
       
       if (logType === 'container' && selectedContainer) {
         params.container = selectedContainer.id;
+        if (applicationId) {
+          params.applicationId = applicationId;
+        }
       }
       
       await emrService.downloadStepLogs(cluster.clusterId, step.id, params);
