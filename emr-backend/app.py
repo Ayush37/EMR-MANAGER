@@ -583,11 +583,11 @@ def get_step_logs(cluster_id, step_id):
                 return jsonify({"error": "Invalid container ID format"}), 400
                 
             application_id = app_id_match.group(1)
-            container_log_prefix = f"logs/{cluster_id}/containers/{application_id}/{container_id}"
+            container_log_prefix = f"logs/containers/{application_id}/{container_id}"
             
             log_files = {
                 'stdout': f"{container_log_prefix}/stdout",
-                'stderr': f"{container_log_prefix}/stderr"
+                'stderr': f"{container_log_prefix}/stderr.gz"
             }
             
             log_file = request.args.get('file', 'stdout')
@@ -597,9 +597,16 @@ def get_step_logs(cluster_id, step_id):
             s3_key = log_files[log_file]
             
             try:
-                # Download the log file (container logs are not gzipped)
+                # Download the log file
                 response = s3.get_object(Bucket=S3_LOG_BUCKET, Key=s3_key)
-                content = response['Body'].read().decode('utf-8', errors='replace')
+                raw_content = response['Body'].read()
+                
+                # Check if it's gzipped (stderr.gz)
+                if s3_key.endswith('.gz'):
+                    with gzip.GzipFile(fileobj=BytesIO(raw_content)) as gz:
+                        content = gz.read().decode('utf-8', errors='replace')
+                else:
+                    content = raw_content.decode('utf-8', errors='replace')
                 
                 # Split into lines for pagination
                 lines = content.split('\n')
@@ -665,12 +672,14 @@ def list_step_containers(cluster_id, step_id):
             app.logger.debug(f"Found application ID: {application_id}")
             
             # List containers under this application
-            prefix = f"logs/{cluster_id}/containers/{application_id}/"
+            prefix = f"logs/containers/{application_id}/"
+            app.logger.debug(f"Looking for containers at S3 path: s3://{S3_LOG_BUCKET}/{prefix}")
             response = s3.list_objects_v2(
                 Bucket=S3_LOG_BUCKET,
                 Prefix=prefix,
                 Delimiter='/'
             )
+            app.logger.debug(f"S3 response for containers: {response}")
             
             containers = []
             if 'CommonPrefixes' in response:
@@ -733,12 +742,23 @@ def download_step_logs(cluster_id, step_id):
                 return jsonify({"error": "Invalid container ID"}), 400
                 
             application_id = app_id_match.group(1)
-            s3_key = f"logs/{cluster_id}/containers/{application_id}/{container_id}/{log_file}"
+            # Add .gz extension for stderr
+            if log_file == 'stderr':
+                s3_key = f"logs/containers/{application_id}/{container_id}/{log_file}.gz"
+            else:
+                s3_key = f"logs/containers/{application_id}/{container_id}/{log_file}"
             filename = f"{container_id}_{log_file}.log"
             
-            # Download (not compressed)
+            # Download
             response = s3.get_object(Bucket=S3_LOG_BUCKET, Key=s3_key)
-            content = response['Body'].read()
+            raw_content = response['Body'].read()
+            
+            # Decompress if gzipped
+            if s3_key.endswith('.gz'):
+                with gzip.GzipFile(fileobj=BytesIO(raw_content)) as gz:
+                    content = gz.read()
+            else:
+                content = raw_content
         
         else:
             return jsonify({"error": "Invalid log type"}), 400
