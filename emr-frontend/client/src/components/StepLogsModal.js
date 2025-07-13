@@ -221,9 +221,18 @@ const StepLogsModal = ({ cluster, step, onClose }) => {
                   >
                     Step Logs
                   </button>
-                  {containers.length > 0 && (
+                  {applicationId && (
                     <button
-                      onClick={() => switchToContainerLogs(containers[0])}
+                      onClick={() => {
+                        if (containers.length > 0) {
+                          switchToContainerLogs(containers[0]);
+                        } else {
+                          setLogType('container');
+                          setLogs(['Container logs are not yet available. They may still be uploading to S3.']);
+                          loadedLines.current = 1;
+                          setHasMore(false);
+                        }
+                      }}
                       className={`px-3 py-1 rounded-md text-sm font-medium ${
                         logType === 'container' 
                           ? 'bg-aws-blue text-white' 
@@ -413,6 +422,27 @@ const StepLogsModal = ({ cluster, step, onClose }) => {
                 <span>Lines: {loadedLines.current} / {totalLines}</span>
                 {searchTerm && (
                   <span className="ml-4">Showing {filteredLogs.length} matching lines</span>
+                )}
+                {logType === 'container' && containers.length === 0 && applicationId && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        const containerData = await emrService.listStepContainers(cluster.clusterId, step.id);
+                        setContainers(containerData.containers || []);
+                        if (containerData.containers && containerData.containers.length > 0) {
+                          switchToContainerLogs(containerData.containers[0]);
+                          toast.success('Container logs found!');
+                        } else {
+                          toast.info('Container logs not yet available');
+                        }
+                      } catch (error) {
+                        toast.error('Failed to check for containers');
+                      }
+                    }}
+                    className="ml-4 text-aws-blue hover:text-aws-blue-dark underline"
+                  >
+                    Check for containers
+                  </button>
                 )}
               </div>
             </div>

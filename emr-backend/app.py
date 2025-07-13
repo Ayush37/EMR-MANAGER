@@ -513,8 +513,8 @@ def get_step_logs(cluster_id, step_id):
         num_lines = int(request.args.get('lines', 1000))
         
         if log_type == 'step':
-            # Fetch step logs
-            step_log_prefix = f"logs/steps/{step_id}"
+            # Fetch step logs - S3 path includes cluster ID
+            step_log_prefix = f"logs/{cluster_id}/steps/{step_id}"
             log_files = {
                 'stderr': f"{step_log_prefix}/stderr.gz",
                 'stdout': f"{step_log_prefix}/stdout.gz",
@@ -642,7 +642,7 @@ def list_step_containers(cluster_id, step_id):
         app.logger.debug(f"Listing containers for step {step_id}")
         
         # First, get the application ID from stderr.gz
-        step_log_key = f"logs/steps/{step_id}/stderr.gz"
+        step_log_key = f"logs/{cluster_id}/steps/{step_id}/stderr.gz"
         
         try:
             response = s3.get_object(Bucket=S3_LOG_BUCKET, Key=step_log_key)
@@ -714,7 +714,7 @@ def download_step_logs(cluster_id, step_id):
         container_id = request.args.get('container')
         
         if log_type == 'step':
-            s3_key = f"logs/steps/{step_id}/{log_file}.gz"
+            s3_key = f"logs/{cluster_id}/steps/{step_id}/{log_file}.gz"
             filename = f"{step_id}_{log_file}.log"
             
             # Download and decompress
