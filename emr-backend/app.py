@@ -591,7 +591,7 @@ def get_step_logs(cluster_id, step_id):
             container_log_prefix = f"logs/{cluster_id}/containers/{application_id}/{container_id}"
             
             log_files = {
-                'stdout': f"{container_log_prefix}/stdout",
+                'stdout': f"{container_log_prefix}/stdout.gz",
                 'stderr': f"{container_log_prefix}/stderr.gz"
             }
             
@@ -752,11 +752,8 @@ def download_step_logs(cluster_id, step_id):
                     application_id = f"application_{container_match.group(1)}_{container_match.group(2)}"
                 else:
                     return jsonify({"error": "Could not determine application ID"}), 400
-            # Add .gz extension for stderr
-            if log_file == 'stderr':
-                s3_key = f"logs/{cluster_id}/containers/{application_id}/{container_id}/{log_file}.gz"
-            else:
-                s3_key = f"logs/{cluster_id}/containers/{application_id}/{container_id}/{log_file}"
+            # Both stdout and stderr are gzipped
+            s3_key = f"logs/{cluster_id}/containers/{application_id}/{container_id}/{log_file}.gz"
             filename = f"{container_id}_{log_file}.log"
             
             # Download
