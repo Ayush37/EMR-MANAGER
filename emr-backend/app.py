@@ -118,6 +118,12 @@ if all([AZURE_OPENAI_ENDPOINT, AZURE_TENANT_ID, AZURE_SPN_CLIENT_ID, AZURE_OPENA
     if os.path.exists(AZURE_PEM_PATH):
         try:
             # Create credential using Service Principal with certificate
+            app.logger.info(f"Initializing Azure OpenAI with endpoint: {AZURE_OPENAI_ENDPOINT}")
+            app.logger.info(f"Using deployment: {AZURE_OPENAI_DEPLOYMENT_NAME}")
+            app.logger.info(f"API version: {AZURE_OPENAI_API_VERSION}")
+            app.logger.info(f"Tenant ID: {AZURE_TENANT_ID[:8]}...") # Log partial for security
+            app.logger.info(f"Client ID: {AZURE_SPN_CLIENT_ID[:8]}...") # Log partial for security
+            
             credential = CertificateCredential(
                 tenant_id=AZURE_TENANT_ID,
                 client_id=AZURE_SPN_CLIENT_ID,
@@ -132,7 +138,7 @@ if all([AZURE_OPENAI_ENDPOINT, AZURE_TENANT_ID, AZURE_SPN_CLIENT_ID, AZURE_OPENA
             )
             
             AZURE_OPENAI_ENABLED = True
-            app.logger.info("Azure OpenAI integration enabled with Service Principal authentication")
+            app.logger.info("Azure OpenAI integration enabled successfully with Service Principal authentication")
         except Exception as e:
             app.logger.error(f"Failed to initialize Azure OpenAI client: {str(e)}")
     else:
@@ -833,24 +839,32 @@ def analyze_step(cluster_id, step_id):
         return jsonify({"error": "Step analysis feature is not available"}), 503
     
     try:
-        app.logger.info(f"Analyzing step {step_id} for cluster {cluster_id}")
+        app.logger.info(f"Starting analysis for step {step_id} in cluster {cluster_id}")
         
         # Get step details first
-        response = emr.describe_step(ClusterId=cluster_id, StepId=step_id)
-        step = response['Step']
-        step_state = step['Status']['State']
-        step_name = step.get('Name', 'Unknown')
+        try:
+            response = emr.describe_step(ClusterId=cluster_id, StepId=step_id)
+            step = response['Step']
+            step_state = step['Status']['State']
+            step_name = step.get('Name', 'Unknown')
+            app.logger.info(f"Step details retrieved - Name: {step_name}, State: {step_state}")
+        except Exception as e:
+            app.logger.error(f"Failed to get step details: {str(e)}")
+            return jsonify({"error": f"Failed to get step details: {str(e)}"}), 500
         
         # Fetch stderr.gz for timeline
         stderr_content = ""
         timeline_info = ""
         try:
             stderr_key = f"logs/{cluster_id}/steps/{step_id}/stderr.gz"
+            app.logger.debug(f"Fetching stderr from S3: s3://{S3_LOG_BUCKET}/{stderr_key}")
             response = s3.get_object(Bucket=S3_LOG_BUCKET, Key=stderr_key)
             compressed_content = response['Body'].read()
+            app.logger.info(f"Retrieved stderr.gz, size: {len(compressed_content)} bytes")
             
             with gzip.GzipFile(fileobj=BytesIO(compressed_content)) as gz:
                 stderr_content = gz.read().decode('utf-8', errors='replace')
+                app.logger.info(f"Decompressed stderr content, length: {len(stderr_content)} characters")
             
             # Extract timeline from stderr (looking for state transitions)
             timeline_lines = []
@@ -872,6 +886,7 @@ def analyze_step(cluster_id, step_id):
                 app_id_matches = re.findall(r'application_\d+_\d+', stderr_content)
                 if app_id_matches:
                     application_id = app_id_matches[0]
+                    app.logger.info(f"Found application ID: {application_id}")
                     
                     # List containers
                     prefix = f"logs/{cluster_id}/containers/{application_id}/"
@@ -891,10 +906,13 @@ def analyze_step(cluster_id, step_id):
                                 break
                     
                     if driver_container:
+                        app.logger.info(f"Found driver container: {driver_container}")
                         # Fetch driver stdout
                         driver_key = f"logs/{cluster_id}/containers/{application_id}/{driver_container}/stdout.gz"
+                        app.logger.debug(f"Fetching driver logs from: s3://{S3_LOG_BUCKET}/{driver_key}")
                         response = s3.get_object(Bucket=S3_LOG_BUCKET, Key=driver_key)
                         compressed_content = response['Body'].read()
+                        app.logger.info(f"Retrieved driver stdout.gz, size: {len(compressed_content)} bytes")
                         
                         with gzip.GzipFile(fileobj=BytesIO(compressed_content)) as gz:
                             full_content = gz.read().decode('utf-8', errors='replace')
@@ -934,9 +952,15 @@ def analyze_step(cluster_id, step_id):
                                         break
                             
                             driver_log_content = '\n'.join(summary_lines[:500])
+                    else:
+                        app.logger.warning("No driver container found")
+                else:
+                    app.logger.warning("No application ID found in stderr")
+            else:
+                app.logger.warning("stderr content is empty")
                             
         except Exception as e:
-            app.logger.warning(f"Could not fetch driver logs: {str(e)}")
+            app.logger.error(f"Error fetching driver logs: {str(e)}", exc_info=True)
         
         # Prepare prompt for Azure OpenAI
         prompt = f"""Analyze this EMR step execution and provide a concise summary:
@@ -961,19 +985,27 @@ Please provide:
 Keep the response under 300 words and focus on actionable insights."""
 
         # Call Azure OpenAI
-        app.logger.info("Calling Azure OpenAI for analysis")
-        completion = azure_openai_client.chat.completions.create(
-            model=AZURE_OPENAI_DEPLOYMENT_NAME,
-            messages=[
-                {"role": "system", "content": "You are an expert in analyzing EMR/Spark job execution logs."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
-            max_tokens=500,
-            timeout=30
-        )
+        app.logger.info(f"Calling Azure OpenAI for analysis with {len(prompt)} character prompt")
+        app.logger.debug(f"Using model: {AZURE_OPENAI_DEPLOYMENT_NAME}")
         
-        analysis = completion.choices[0].message.content
+        try:
+            completion = azure_openai_client.chat.completions.create(
+                model=AZURE_OPENAI_DEPLOYMENT_NAME,
+                messages=[
+                    {"role": "system", "content": "You are an expert in analyzing EMR/Spark job execution logs."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=500,
+                timeout=30
+            )
+            
+            analysis = completion.choices[0].message.content
+            app.logger.info(f"Azure OpenAI analysis completed, response length: {len(analysis)} characters")
+            
+        except Exception as e:
+            app.logger.error(f"Azure OpenAI API error: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Failed to get AI analysis: {str(e)}"}), 500
         
         return jsonify({
             'stepId': step_id,
