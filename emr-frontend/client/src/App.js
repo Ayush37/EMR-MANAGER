@@ -14,6 +14,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedStates, setSelectedStates] = useState([]);
   const [selectedCluster, setSelectedCluster] = useState(null);
   const [showStepsModal, setShowStepsModal] = useState(false);
   
@@ -33,7 +34,7 @@ function App() {
     try {
       setLoading(true);
       setError(null);
-      const response = await emrService.listClusters(page, 20, environment);
+      const response = await emrService.listClusters(page, 20, environment, searchTerm, selectedStates);
       
       if (response.clusters) {
         setClusters(response.clusters);
@@ -52,22 +53,24 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [environment]);
+  }, [environment, searchTerm, selectedStates]);
 
   useEffect(() => {
+    setCurrentPage(1); // Reset to first page when filters change
+    fetchClusters(1);
+  }, [environment, searchTerm, selectedStates]);
+  
+  useEffect(() => {
     fetchClusters(currentPage);
-  }, [currentPage, environment, fetchClusters]);
+  }, [currentPage, fetchClusters]);
 
   // Persist environment selection
   useEffect(() => {
     localStorage.setItem('emr-environment', environment);
   }, [environment]);
 
-  // Filter clusters based on search term only (environment filtering is done by backend)
-  const filteredClusters = clusters.filter(cluster => 
-    cluster.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    cluster.state.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // All filtering is done by backend now
+  const filteredClusters = clusters;
 
   const handleClusterClick = (cluster) => {
     setSelectedCluster(cluster);
@@ -106,7 +109,14 @@ function App() {
 
   const handleEnvironmentChange = (newEnvironment) => {
     setEnvironment(newEnvironment);
-    setCurrentPage(1); // Reset to first page when changing environment
+  };
+  
+  const handleSearchChange = (value) => {
+    setSearchTerm(value);
+  };
+  
+  const handleStatesChange = (states) => {
+    setSelectedStates(states);
   };
 
   return (
@@ -133,12 +143,39 @@ function App() {
         <div className="mb-6 space-y-4">
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1">
-              <SearchBar value={searchTerm} onChange={setSearchTerm} />
+              <SearchBar value={searchTerm} onChange={handleSearchChange} />
             </div>
             <div className="w-full sm:w-64">
               <EnvironmentFilter value={environment} onChange={handleEnvironmentChange} />
             </div>
           </div>
+          
+          {/* Active Filters */}
+          {selectedStates.length > 0 && (
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-sm text-gray-600">Active filters:</span>
+              {selectedStates.map(state => (
+                <span
+                  key={state}
+                  className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800"
+                >
+                  Status: {state}
+                  <button
+                    onClick={() => handleStatesChange(selectedStates.filter(s => s !== state))}
+                    className="ml-2 text-gray-500 hover:text-gray-700"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              <button
+                onClick={() => handleStatesChange([])}
+                className="text-xs text-aws-blue hover:text-aws-blue-dark"
+              >
+                Clear all
+              </button>
+            </div>
+          )}
           
           <div className="flex justify-between items-center">
             <p className="text-sm text-gray-700">
@@ -163,6 +200,9 @@ function App() {
         {/* Cluster Table */}
         <ClusterTable
           clusters={filteredClusters}
+          allClusters={clusters}
+          selectedStates={selectedStates}
+          onStatesChange={handleStatesChange}
           onClusterClick={handleClusterClick}
           onStart={handleStartCluster}
           onTerminate={handleTerminateCluster}

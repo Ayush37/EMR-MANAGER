@@ -1,8 +1,9 @@
 import React from 'react';
 import StatusBadge from './StatusBadge';
+import StatusFilter from './StatusFilter';
 import { formatDate } from '../utils/formatters';
 
-const ClusterTable = ({ clusters, onClusterClick, onStart, onTerminate, loading }) => {
+const ClusterTable = ({ clusters, allClusters, selectedStates, onStatesChange, onClusterClick, onStart, onTerminate, loading }) => {
   if (loading) {
     return (
       <div className="bg-white shadow-sm rounded-lg p-8 text-center">
@@ -47,17 +48,18 @@ const ClusterTable = ({ clusters, onClusterClick, onStart, onTerminate, loading 
             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Environment
             </th>
-            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Status
+            <th scope="col" className="px-6 py-3 text-left">
+              <StatusFilter 
+                selectedStates={selectedStates}
+                onStatesChange={onStatesChange}
+                clusters={allClusters || clusters}
+              />
             </th>
             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Step Count
             </th>
             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Created
-            </th>
-            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Last Activity
             </th>
             <th scope="col" className="relative px-6 py-3">
               <span className="sr-only">Actions</span>
@@ -88,9 +90,6 @@ const ClusterTable = ({ clusters, onClusterClick, onStart, onTerminate, loading 
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                 {formatDate(cluster.timeline?.creationDateTime)}
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                {formatDate(cluster.lastActivity || cluster.timeline?.readyDateTime || cluster.timeline?.creationDateTime)}
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                 {cluster.state === 'TERMINATED' ? (

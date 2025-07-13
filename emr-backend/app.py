@@ -126,10 +126,17 @@ def get_clusters():
     try:
         app.logger.debug("Fetching clusters data")
         
-        # Get pagination parameters
+        # Get parameters
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 20))
         environment = request.args.get('environment', 'all')
+        search = request.args.get('search', '').lower()
+        states = request.args.get('states', '')  # comma-separated list
+        
+        # Parse states filter
+        state_filter = []
+        if states:
+            state_filter = [s.strip().upper() for s in states.split(',') if s.strip()]
         
         # Validate pagination parameters
         if page < 1:
@@ -159,6 +166,24 @@ def get_clusters():
         # Merge the data
         merged_clusters = map_cluster_states(cluster_configs, emr_clusters)
         app.logger.debug(f"Merged data for {len(merged_clusters)} clusters")
+        
+        # Apply search filter
+        if search:
+            merged_clusters = [
+                cluster for cluster in merged_clusters
+                if search in cluster['name'].lower() or
+                   search in cluster.get('clusterId', '').lower() or
+                   search in cluster.get('state', '').lower()
+            ]
+            app.logger.debug(f"After search filter: {len(merged_clusters)} clusters")
+        
+        # Apply state filter
+        if state_filter:
+            merged_clusters = [
+                cluster for cluster in merged_clusters
+                if cluster.get('state', 'UNKNOWN') in state_filter
+            ]
+            app.logger.debug(f"After state filter: {len(merged_clusters)} clusters")
         
         # Apply pagination
         total_count = len(merged_clusters)

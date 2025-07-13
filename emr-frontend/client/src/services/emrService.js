@@ -11,9 +11,23 @@ class EMRService {
     return response.json();
   }
 
-  async listClusters(page = 1, limit = 20, environment = 'all') {
+  async listClusters(page = 1, limit = 20, environment = 'all', search = '', states = []) {
     try {
-      const response = await fetch(`${API_BASE_URL}/clusters?page=${page}&limit=${limit}&environment=${environment}`, {
+      const params = new URLSearchParams({
+        page,
+        limit,
+        environment
+      });
+      
+      if (search) {
+        params.append('search', search);
+      }
+      
+      if (states && states.length > 0) {
+        params.append('states', states.join(','));
+      }
+      
+      const response = await fetch(`${API_BASE_URL}/clusters?${params.toString()}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
