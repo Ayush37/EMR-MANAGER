@@ -8,10 +8,6 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__)
