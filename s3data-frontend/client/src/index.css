@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* AWS Color Palette */
+:root {
+  --aws-orange: #FF9900;
+  --aws-blue: #232F3E;
+  --aws-blue-dark: #161E2D;
+  --aws-gray: #EAEDED;
+}
+
+/* Custom utility classes */
+.text-aws-orange {
+  color: var(--aws-orange);
+}
+
+.text-aws-blue {
+  color: var(--aws-blue);
+}
+
+.text-aws-blue-dark {
+  color: var(--aws-blue-dark);
+}
+
+.bg-aws-orange {
+  background-color: var(--aws-orange);
+}
+
+.bg-aws-blue {
+  background-color: var(--aws-blue);
+}
+
+.bg-aws-blue-dark {
+  background-color: var(--aws-blue-dark);
+}
+
+.hover\:bg-aws-blue-dark:hover {
+  background-color: var(--aws-blue-dark);
+}
+
+.hover\:text-aws-blue:hover {
+  color: var(--aws-blue);
+}
+
+.hover\:text-aws-blue-dark:hover {
+  color: var(--aws-blue-dark);
+}
+
+.focus\:ring-aws-blue:focus {
+  --tw-ring-color: var(--aws-blue);
+}
