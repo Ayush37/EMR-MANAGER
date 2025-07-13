@@ -171,9 +171,9 @@ def get_clusters():
         if search:
             merged_clusters = [
                 cluster for cluster in merged_clusters
-                if search in cluster['name'].lower() or
-                   search in cluster.get('clusterId', '').lower() or
-                   search in cluster.get('state', '').lower()
+                if (cluster.get('name') and search in cluster['name'].lower()) or
+                   (cluster.get('clusterId') and search in cluster.get('clusterId', '').lower()) or
+                   (cluster.get('state') and search in cluster.get('state', '').lower())
             ]
             app.logger.debug(f"After search filter: {len(merged_clusters)} clusters")
         
