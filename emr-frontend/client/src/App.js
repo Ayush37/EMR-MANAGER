@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Toaster, toast } from 'react-hot-toast';
 import ClusterTable from './components/ClusterTable';
-import ClusterStepsModal from './components/ClusterStepsModal';
+import ClusterDetailsModal from './components/ClusterDetailsModal';
 import SearchBar from './components/SearchBar';
 import EnvironmentFilter from './components/EnvironmentFilter';
 import LoadingSpinner from './components/LoadingSpinner';
@@ -16,7 +16,7 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStates, setSelectedStates] = useState([]);
   const [selectedCluster, setSelectedCluster] = useState(null);
-  const [showStepsModal, setShowStepsModal] = useState(false);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
   
   // Environment filter with localStorage persistence
   const [environment, setEnvironment] = useState(() => {
@@ -74,7 +74,7 @@ function App() {
 
   const handleClusterClick = (cluster) => {
     setSelectedCluster(cluster);
-    setShowStepsModal(true);
+    setShowDetailsModal(true);
   };
 
   const handleStartCluster = async (cluster) => {
@@ -223,12 +223,12 @@ function App() {
         )}
       </div>
 
-      {/* Steps Modal */}
-      {showStepsModal && selectedCluster && (
-        <ClusterStepsModal
+      {/* Cluster Details Modal */}
+      {showDetailsModal && selectedCluster && (
+        <ClusterDetailsModal
           cluster={selectedCluster}
           onClose={() => {
-            setShowStepsModal(false);
+            setShowDetailsModal(false);
             setSelectedCluster(null);
           }}
         />

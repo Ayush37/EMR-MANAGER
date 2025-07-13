@@ -593,6 +593,35 @@ def list_emr_clusters():
         app.logger.error(f"Error listing EMR clusters: {str(e)}", exc_info=True)
         return []
 
+def get_step_count(cluster_id):
+    """Get the total number of steps for a cluster"""
+    try:
+        # Only get the first page with limit=1 to get the total count
+        response = emr.list_steps(ClusterId=cluster_id, MaxResults=1)
+        
+        # AWS doesn't provide a direct total count, so we need to iterate
+        total_count = 0
+        marker = None
+        
+        while True:
+            kwargs = {'ClusterId': cluster_id}
+            if marker:
+                kwargs['Marker'] = marker
+            
+            response = emr.list_steps(**kwargs)
+            steps = response.get('Steps', [])
+            total_count += len(steps)
+            
+            marker = response.get('Marker')
+            if not marker:
+                break
+        
+        return total_count
+    except Exception as e:
+        app.logger.error(f"Error getting step count for cluster {cluster_id}: {str(e)}")
+        return 0
+
+
 def map_cluster_states(cluster_configs, emr_clusters):
     """Maps cluster name to its state by finding the corresponding clusterID"""
     app.logger.debug("Mapping cluster states")
@@ -612,6 +641,12 @@ def map_cluster_states(cluster_configs, emr_clusters):
         else:
             app.logger.debug(f"No matching EMR cluster found for: {config['name']}")
 
+        # Get step count if we have a cluster ID
+        step_count = 0
+        if matching_cluster and matching_cluster.get('Id'):
+            step_count = get_step_count(matching_cluster['Id'])
+            app.logger.debug(f"Cluster {config['name']} has {step_count} steps")
+
         # For serialization, ensure all datetime objects are converted to strings
         timeline = None
         if matching_cluster and 'Status' in matching_cluster and 'Timeline' in matching_cluster['Status']:
@@ -629,7 +664,8 @@ def map_cluster_states(cluster_configs, emr_clusters):
             "lastStateChangeReason": matching_cluster.get('Status', {}).get('StateChangeReason') if matching_cluster else None,
             "timeline": timeline,
             "applications": matching_cluster.get('Applications', []) if matching_cluster else [],
-            "tags": matching_cluster.get('Tags', []) if matching_cluster else []
+            "tags": matching_cluster.get('Tags', []) if matching_cluster else [],
+            "stepCount": step_count
         }
         result.append(merged_info)
         app.logger.debug(f"Completed mapping for cluster: {config['name']}")
