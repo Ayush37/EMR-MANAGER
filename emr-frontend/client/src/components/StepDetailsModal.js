@@ -2,14 +2,12 @@ import React, { useState, useEffect } from 'react';
 import JsonView from '@uiw/react-json-view';
 import emrService from '../services/emrService';
 import LoadingSpinner from './LoadingSpinner';
-import StepLogsModal from './StepLogsModal';
 import { formatDate } from '../utils/formatters';
 
 const StepDetailsModal = ({ cluster, step, onClose }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [stepDetails, setStepDetails] = useState(null);
-  const [showLogsModal, setShowLogsModal] = useState(false);
 
   useEffect(() => {
     fetchStepDetails();
@@ -156,15 +154,6 @@ const StepDetailsModal = ({ cluster, step, onClose }) => {
               </div>
             </div>
             <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-              {stepDetails && ['COMPLETED', 'FAILED', 'RUNNING'].includes(stepDetails.state) && (
-                <button
-                  type="button"
-                  className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-aws-blue text-base font-medium text-white hover:bg-aws-blue-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-aws-blue sm:ml-3 sm:w-auto sm:text-sm"
-                  onClick={() => setShowLogsModal(true)}
-                >
-                  View Logs
-                </button>
-              )}
               <button
                 type="button"
                 className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-aws-blue sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
@@ -177,14 +166,6 @@ const StepDetailsModal = ({ cluster, step, onClose }) => {
         </div>
       </div>
 
-      {/* Step Logs Modal */}
-      {showLogsModal && stepDetails && (
-        <StepLogsModal
-          cluster={cluster}
-          step={stepDetails}
-          onClose={() => setShowLogsModal(false)}
-        />
-      )}
     </>
   );
 };

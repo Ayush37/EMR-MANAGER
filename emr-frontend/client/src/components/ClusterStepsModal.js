@@ -3,6 +3,7 @@ import emrService from '../services/emrService';
 import LoadingSpinner from './LoadingSpinner';
 import StepDetailsModal from './StepDetailsModal';
 import StepDuplicationModal from './StepDuplicationModal';
+import StepLogsModal from './StepLogsModal';
 import Pagination from './Pagination';
 import { formatDate } from '../utils/formatters';
 import toast from 'react-hot-toast';
@@ -14,6 +15,7 @@ const ClusterStepsModal = ({ cluster, onClose }) => {
   const [selectedStep, setSelectedStep] = useState(null);
   const [showStepDetails, setShowStepDetails] = useState(false);
   const [showDuplicationModal, setShowDuplicationModal] = useState(false);
+  const [showLogsModal, setShowLogsModal] = useState(false);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -60,6 +62,11 @@ const ClusterStepsModal = ({ cluster, onClose }) => {
   const handleDuplicate = (step) => {
     setSelectedStep(step);
     setShowDuplicationModal(true);
+  };
+
+  const handleViewLogs = (step) => {
+    setSelectedStep(step);
+    setShowLogsModal(true);
   };
 
   const handleCancelStep = async (step) => {
@@ -184,6 +191,14 @@ const ClusterStepsModal = ({ cluster, onClose }) => {
                                       >
                                         Details
                                       </button>
+                                      {['COMPLETED', 'FAILED', 'RUNNING'].includes(step.state) && (
+                                        <button
+                                          onClick={() => handleViewLogs(step)}
+                                          className="text-purple-600 hover:text-purple-900 mr-3"
+                                        >
+                                          Logs
+                                        </button>
+                                      )}
                                       <button
                                         onClick={() => handleDuplicate(step)}
                                         className="text-green-600 hover:text-green-900 mr-3"
@@ -250,6 +265,14 @@ const ClusterStepsModal = ({ cluster, onClose }) => {
           step={selectedStep}
           onClose={() => setShowDuplicationModal(false)}
           onSuccess={handleStepDuplicated}
+        />
+      )}
+
+      {showLogsModal && selectedStep && (
+        <StepLogsModal
+          cluster={cluster}
+          step={selectedStep}
+          onClose={() => setShowLogsModal(false)}
         />
       )}
     </>
