@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Current Status (Last Updated: Session from Human)
+## Current Status (Last Updated: 2025-07-13)
 
 ### Working Features
 - ✅ EMR cluster management with multi-environment support (UAT1/2/3)
@@ -12,26 +12,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - ✅ Both services deployed to ECS with ALB routing
 - ✅ IAM role-based authentication for ECS
 - ✅ Health checks configured for ECS
+- ✅ Step logs viewer (implemented) - View stdout/stderr from S3 for both steps and containers
+- ✅ AI-powered step analysis using Azure OpenAI (implemented)
 
-### Recent Session Work
-1. Removed auto-refresh functionality
-2. Fixed environment filtering (backend-only now)
-3. Added AWS EMR-style status filter in column header
-4. Implemented backend search across all clusters
-5. Fixed multiple deployment issues (dotenv, health checks, route parameters)
-6. Removed Last Activity column from UI
+### Recent Session Work (2025-07-13)
+1. **Fixed Container Logs Issues**:
+   - Added cluster_id to container log S3 paths
+   - Fixed container ID validation (removed application_ pattern requirement)
+   - Added applicationId parameter passing from frontend
+   - Fixed stdout.gz file handling (both stdout and stderr are gzipped)
+
+2. **UI Improvements**:
+   - Moved "View Logs" button from Step Details modal to main Steps table
+   - Added alongside Details, Duplicate buttons for easier access
+   - Used purple color scheme for Logs button
+
+3. **Implemented AI Step Analysis**:
+   - Azure OpenAI integration with Service Principal + PEM authentication
+   - New endpoint: POST /api/clusters/{cluster_id}/steps/{step_id}/analyze
+   - Fetches stderr.gz (timeline) and driver stdout.gz (execution details)
+   - Provides AI-generated insights on failures, performance, and optimizations
+   - Added comprehensive CloudWatch logging for troubleshooting
 
 ### Next Steps
-1. Implement step logs viewer (stdout/stderr from S3)
-2. Add DynamoDB service following established patterns
-3. Add S3 service with bucket/object management
-4. Consider adding cluster creation functionality
+1. Add DynamoDB service following established patterns
+2. Add S3 service with bucket/object management
+3. Consider adding cluster creation functionality
+4. Consider implementing cluster-level efficiency analysis (using CloudWatch metrics)
 
 ### For Next Session
 To continue work, reference:
 - This CLAUDE.md file for project context
 - Recent commits for latest changes
-- The planned step logs feature design (see Planned Features section)
+- Azure OpenAI configuration details below
 - Current deployment status on ECS
 
 ## Project Overview
@@ -297,20 +310,32 @@ The project uses Docker for containerization:
 6. **Backend Filtering**: All search/filter operations done server-side for performance
 7. **Filter Persistence**: Environment selection saved in localStorage
 
-### Recent Bug Fixes (Session Updates)
+### Recent Bug Fixes (Previous Sessions)
 1. **Fixed Flask Route Parameters**: Changed `<n>` to `<name>` in cluster endpoints
 2. **Added python-dotenv**: Added to pyproject.toml for Docker builds
 3. **Health Check Fix**: Added `/health` endpoint for ECS health checks
 4. **CORS Configuration**: Removed hardcoded origins for production deployment
 5. **Environment Filtering**: Fixed client-side filtering that was overriding backend filters
 
-### Planned Features (In Progress)
-1. **Step Logs Viewer**: 
-   - Backend endpoint to fetch stdout/stderr logs from S3
-   - Challenge: Logs stored by YARN application ID, not step ID
-   - Solution: Parse application ID from step details/state change reason
-   - UI: Add "View Logs" button in step details modal
-   - Features: Show logs by container, search, tail mode, download option
+### Bug Fixes (2025-07-13 Session)
+1. **Container Log Paths**: Added missing cluster_id to S3 paths (logs/{cluster_id}/containers/...)
+2. **Container ID Format**: Fixed validation to accept actual container ID format instead of application_ pattern
+3. **Application ID Passing**: Frontend now passes applicationId to backend for container log requests
+4. **Gzipped Files**: Fixed to handle both stdout.gz and stderr.gz (both are compressed)
+
+### Completed Features (This Session)
+1. **Step Logs Viewer** ✅: 
+   - Backend endpoints for fetching step and container logs from S3
+   - Successfully extracts YARN application ID from stderr.gz
+   - UI: "Logs" button in steps table (purple color)
+   - Features: Tab switching between step/container logs, virtual scrolling, search, syntax highlighting, download
+   - Auto-refresh option for running steps
+
+2. **AI Step Analysis** ✅:
+   - Azure OpenAI integration for intelligent log analysis
+   - Provides insights on failures, performance, and optimizations
+   - Service Principal authentication with PEM certificate
+   - Comprehensive error handling and logging
 
 ## Recent Additions (SSM Service)
 
@@ -440,3 +465,69 @@ dynamodb-frontend/
    - [ ] Validate IAM permissions
    - [ ] Check responsive design
 ```
+
+## Azure OpenAI Step Analysis Feature
+
+### Overview
+Implemented AI-powered step analysis that analyzes EMR step execution logs using Azure OpenAI to provide insights on failures, performance issues, and optimization opportunities.
+
+### Implementation Details
+
+#### Backend Configuration
+1. **Authentication**: Service Principal with PEM certificate
+2. **Environment Variables** (in Dockerfile):
+   ```dockerfile
+   ENV AZURE_OPENAI_ENDPOINT=""  # e.g., https://your-resource.openai.azure.com/
+   ENV AZURE_OPENAI_API_VERSION="2024-02-15-preview"
+   ENV AZURE_OPENAI_DEPLOYMENT_NAME=""  # Your deployment name
+   ENV AZURE_TENANT_ID=""
+   ENV AZURE_SPN_CLIENT_ID=""
+   ```
+
+3. **PEM Certificate**:
+   - Place `azure_cert.pem` in same directory as Dockerfile
+   - Copied to `/app/azure_cert.pem` with 600 permissions
+   - Added to .gitignore for security
+
+4. **Dependencies Added**:
+   - `openai==1.35.3`
+   - `azure-identity==1.16.0`
+
+#### API Endpoint
+- **URL**: `POST /api/clusters/{cluster_id}/steps/{step_id}/analyze`
+- **Process**:
+  1. Fetches step details from EMR API
+  2. Retrieves stderr.gz for timeline information
+  3. Finds driver container and fetches stdout.gz
+  4. Extracts relevant sections based on step state
+  5. Sends to Azure OpenAI with structured prompt
+  6. Returns AI analysis
+
+#### Frontend Implementation
+1. **Analyze Button**: Added to Steps table (indigo color)
+2. **StepAnalysisModal**: Displays AI analysis with:
+   - Loading state during analysis
+   - Step information header
+   - Formatted AI response
+   - Error handling
+
+#### Logging for Troubleshooting
+Key CloudWatch log messages:
+- Initialization: `"Azure OpenAI integration enabled successfully..."`
+- Analysis start: `"Starting analysis for step ... in cluster ..."`
+- Data fetching: `"Retrieved stderr.gz, size: ... bytes"`
+- API call: `"Calling Azure OpenAI for analysis with ... character prompt"`
+- Completion: `"Azure OpenAI analysis completed, response length: ..."`
+- Errors: Detailed error messages with stack traces
+
+### Deployment Steps
+1. Fill in environment variables in Dockerfile
+2. Place PEM certificate file in emr-backend directory
+3. Build Docker image: `docker build -t emr-backend .`
+4. Deploy to ECS as usual
+
+### Future Enhancements Discussed
+1. **Cluster Efficiency Analysis**: Analyze overall cluster resource utilization
+2. **Advanced Step Analysis**: Deep dive into executor logs for data skew, bad joins, etc.
+3. **Caching**: Store analysis results to avoid re-analyzing completed steps
+4. **Batch Analysis**: Analyze multiple steps or compare similar jobs
