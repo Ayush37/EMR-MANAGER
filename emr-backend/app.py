@@ -583,7 +583,7 @@ def get_step_logs(cluster_id, step_id):
                 return jsonify({"error": "Invalid container ID format"}), 400
                 
             application_id = app_id_match.group(1)
-            container_log_prefix = f"logs/containers/{application_id}/{container_id}"
+            container_log_prefix = f"logs/{cluster_id}/containers/{application_id}/{container_id}"
             
             log_files = {
                 'stdout': f"{container_log_prefix}/stdout",
@@ -665,7 +665,7 @@ def list_step_containers(cluster_id, step_id):
             app.logger.debug(f"Found application ID: {application_id}")
             
             # List containers under this application
-            prefix = f"logs/containers/{application_id}/"
+            prefix = f"logs/{cluster_id}/containers/{application_id}/"
             response = s3.list_objects_v2(
                 Bucket=S3_LOG_BUCKET,
                 Prefix=prefix,
@@ -733,7 +733,7 @@ def download_step_logs(cluster_id, step_id):
                 return jsonify({"error": "Invalid container ID"}), 400
                 
             application_id = app_id_match.group(1)
-            s3_key = f"logs/containers/{application_id}/{container_id}/{log_file}"
+            s3_key = f"logs/{cluster_id}/containers/{application_id}/{container_id}/{log_file}"
             filename = f"{container_id}_{log_file}.log"
             
             # Download (not compressed)
