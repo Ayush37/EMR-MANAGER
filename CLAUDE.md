@@ -2,6 +2,38 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Current Status (Last Updated: Session from Human)
+
+### Working Features
+- ✅ EMR cluster management with multi-environment support (UAT1/2/3)
+- ✅ Advanced filtering: search across all clusters, multi-state filtering
+- ✅ Step management: view, duplicate, cancel steps
+- ✅ SSM parameter management with full CRUD
+- ✅ Both services deployed to ECS with ALB routing
+- ✅ IAM role-based authentication for ECS
+- ✅ Health checks configured for ECS
+
+### Recent Session Work
+1. Removed auto-refresh functionality
+2. Fixed environment filtering (backend-only now)
+3. Added AWS EMR-style status filter in column header
+4. Implemented backend search across all clusters
+5. Fixed multiple deployment issues (dotenv, health checks, route parameters)
+6. Removed Last Activity column from UI
+
+### Next Steps
+1. Implement step logs viewer (stdout/stderr from S3)
+2. Add DynamoDB service following established patterns
+3. Add S3 service with bucket/object management
+4. Consider adding cluster creation functionality
+
+### For Next Session
+To continue work, reference:
+- This CLAUDE.md file for project context
+- Recent commits for latest changes
+- The planned step logs feature design (see Planned Features section)
+- Current deployment status on ECS
+
 ## Project Overview
 
 EMR-MANAGER is a multi-service web application platform for managing various AWS services. Currently implemented:
@@ -239,15 +271,22 @@ The project uses Docker for containerization:
 3. **Enhanced Pagination**: Consistent pagination across all endpoints
 4. **Environment-Aware Operations**: Start/terminate operations use environment-specific Lambdas
 5. **Step Details**: Comprehensive step information including timeline and failure details
+6. **Advanced Filtering**: Backend now supports search and multi-state filtering
+7. **Automatic IAM Role Detection**: Uses ECS task roles in production, falls back to profile for local dev
+8. **Request/Response Logging**: Added middleware for comprehensive request tracking
+9. **Health Check Endpoints**: Dual endpoints at `/health` and `/api/health` for ECS compatibility
 
 ### Frontend Features
-1. **Environment Filter**: Dropdown selector with localStorage persistence
-2. **Enhanced Cluster Table**: Added environment, step count, and last activity columns
+1. **Environment Filter**: Dropdown selector with localStorage persistence (defaults to 'all')
+2. **Enhanced Cluster Table**: Shows environment, status, step count, and created date
 3. **Cluster Steps Modal**: View all steps for a cluster with pagination
 4. **Step Management**: Duplicate steps with edit capability, cancel running steps
 5. **Step Details Viewer**: JSON tree view for step configuration and metadata
-6. **Manual Refresh**: Users can refresh clusters using the refresh button
-7. **Search Functionality**: Filter clusters by name, status, or environment
+6. **Manual Refresh**: Users can refresh clusters using the refresh button (removed auto-refresh)
+7. **Advanced Search**: Backend search across all clusters in environment (name, ID, status)
+8. **Status Filter Dropdown**: AWS EMR-style multi-select filter in Status column header
+9. **Active Filters Display**: Shows and manages active filters below search bar
+10. **Removed Features**: Last Activity column removed for cleaner UI
 
 ### Key Implementation Patterns
 1. **Modal Architecture**: Nested modals for steps list → step details/duplication
@@ -255,6 +294,23 @@ The project uses Docker for containerization:
 3. **Error Handling**: Toast notifications for all user actions
 4. **Responsive Design**: Mobile-friendly with Tailwind CSS
 5. **Consistent UI**: Matches SSM service design patterns
+6. **Backend Filtering**: All search/filter operations done server-side for performance
+7. **Filter Persistence**: Environment selection saved in localStorage
+
+### Recent Bug Fixes (Session Updates)
+1. **Fixed Flask Route Parameters**: Changed `<n>` to `<name>` in cluster endpoints
+2. **Added python-dotenv**: Added to pyproject.toml for Docker builds
+3. **Health Check Fix**: Added `/health` endpoint for ECS health checks
+4. **CORS Configuration**: Removed hardcoded origins for production deployment
+5. **Environment Filtering**: Fixed client-side filtering that was overriding backend filters
+
+### Planned Features (In Progress)
+1. **Step Logs Viewer**: 
+   - Backend endpoint to fetch stdout/stderr logs from S3
+   - Challenge: Logs stored by YARN application ID, not step ID
+   - Solution: Parse application ID from step details/state change reason
+   - UI: Add "View Logs" button in step details modal
+   - Features: Show logs by container, search, tail mode, download option
 
 ## Recent Additions (SSM Service)
 
@@ -383,3 +439,4 @@ dynamodb-frontend/
    - [ ] Test error scenarios
    - [ ] Validate IAM permissions
    - [ ] Check responsive design
+```
