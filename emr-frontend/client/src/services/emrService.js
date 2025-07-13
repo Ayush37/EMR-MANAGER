@@ -147,6 +147,68 @@ class EMRService {
       throw error;
     }
   }
+
+  async getStepLogs(clusterId, stepId, params = {}) {
+    try {
+      const queryParams = new URLSearchParams(params).toString();
+      const response = await fetch(`${API_BASE_URL}/clusters/${clusterId}/steps/${stepId}/logs?${queryParams}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      return this.handleResponse(response);
+    } catch (error) {
+      console.error('Error fetching step logs:', error);
+      throw error;
+    }
+  }
+
+  async listStepContainers(clusterId, stepId) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/clusters/${clusterId}/steps/${stepId}/logs/containers`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      return this.handleResponse(response);
+    } catch (error) {
+      console.error('Error listing containers:', error);
+      throw error;
+    }
+  }
+
+  async downloadStepLogs(clusterId, stepId, params = {}) {
+    try {
+      const queryParams = new URLSearchParams(params).toString();
+      const response = await fetch(`${API_BASE_URL}/clusters/${clusterId}/steps/${stepId}/logs/download?${queryParams}`);
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to download logs');
+      }
+      
+      // Get filename from Content-Disposition header
+      const contentDisposition = response.headers.get('Content-Disposition');
+      const filenameMatch = /filename="(.+)"/.exec(contentDisposition);
+      const filename = filenameMatch ? filenameMatch[1] : 'logs.txt';
+      
+      // Create blob and download
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Error downloading logs:', error);
+      throw error;
+    }
+  }
 }
 
 export default new EMRService();

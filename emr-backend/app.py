@@ -4,10 +4,13 @@ import json
 import logging
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
+import gzip
+import re
+from io import BytesIO
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -63,6 +66,7 @@ try:
         ssm = session.client('ssm')
         emr = session.client('emr')
         lambda_client = session.client('lambda')
+        s3 = session.client('s3')
         app.logger.info('AWS session initialized with IAM role credentials')
     else:
         # Use profile for local development
@@ -71,12 +75,14 @@ try:
         ssm = session.client('ssm')
         emr = session.client('emr')
         lambda_client = session.client('lambda')
+        s3 = session.client('s3')
         app.logger.info(f'AWS session initialized with profile: {AWS_PROFILE}')
 except Exception as e:
     app.logger.error(f'Failed to initialize AWS session: {str(e)}')
     ssm = None
     emr = None
     lambda_client = None
+    s3 = None
 
 # Constants for multiple environments
 PARAM_STORE_PATHS = {
@@ -90,6 +96,9 @@ LAMBDA_FUNCTION_NAMES = {
     'uat2': "app-job_submit_lambda_uat2",
     'uat3': "app-job_submit_lambda_uat3"
 }
+
+# S3 log bucket for all UAT environments
+S3_LOG_BUCKET = 'app-id-107923-dep-id-107924-uu-id-mpm6sfacq4a8'
 
 # Request logging middleware
 @app.before_request
@@ -488,6 +497,266 @@ def cancel_step(cluster_id, step_id):
         
     except Exception as e:
         app.logger.error(f"Error cancelling step: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+@app.route(f'{URL_PREFIX}/clusters/<cluster_id>/steps/<step_id>/logs', methods=['GET'])
+def get_step_logs(cluster_id, step_id):
+    """Get logs for a specific step"""
+    try:
+        app.logger.debug(f"Fetching logs for step {step_id} in cluster {cluster_id}")
+        
+        # Get log type from query parameter
+        log_type = request.args.get('type', 'step')  # 'step' or 'container'
+        log_file = request.args.get('file', 'stderr')  # For step logs
+        container_id = request.args.get('container')  # For container logs
+        start_line = int(request.args.get('start', 0))
+        num_lines = int(request.args.get('lines', 1000))
+        
+        if log_type == 'step':
+            # Fetch step logs
+            step_log_prefix = f"logs/steps/{step_id}"
+            log_files = {
+                'stderr': f"{step_log_prefix}/stderr.gz",
+                'stdout': f"{step_log_prefix}/stdout.gz",
+                'controller': f"{step_log_prefix}/controller.gz",
+                'syslog': f"{step_log_prefix}/syslog.gz"
+            }
+            
+            if log_file not in log_files:
+                return jsonify({"error": "Invalid log file"}), 400
+                
+            s3_key = log_files[log_file]
+            
+            try:
+                # Download and decompress the log file
+                response = s3.get_object(Bucket=S3_LOG_BUCKET, Key=s3_key)
+                compressed_content = response['Body'].read()
+                
+                # Decompress gzip content
+                with gzip.GzipFile(fileobj=BytesIO(compressed_content)) as gz:
+                    content = gz.read().decode('utf-8', errors='replace')
+                
+                # Split into lines for pagination
+                lines = content.split('\n')
+                total_lines = len(lines)
+                
+                # Get requested lines
+                end_line = min(start_line + num_lines, total_lines)
+                requested_lines = lines[start_line:end_line]
+                
+                # Parse application ID from stderr if this is stderr.gz
+                application_id = None
+                if log_file == 'stderr':
+                    app_id_pattern = r'application_\d+_\d+'
+                    matches = re.findall(app_id_pattern, content)
+                    if matches:
+                        application_id = matches[0]  # Get the first match
+                        app.logger.debug(f"Found application ID: {application_id}")
+                
+                return jsonify({
+                    'lines': requested_lines,
+                    'totalLines': total_lines,
+                    'startLine': start_line,
+                    'endLine': end_line,
+                    'hasMore': end_line < total_lines,
+                    'applicationId': application_id,
+                    'logType': 'step',
+                    'logFile': log_file
+                })
+                
+            except s3.exceptions.NoSuchKey:
+                app.logger.warning(f"Log file not found: {s3_key}")
+                return jsonify({
+                    'lines': [f"Log file not found: {log_file}.gz"],
+                    'totalLines': 1,
+                    'error': 'Log file not found'
+                }), 404
+                
+        elif log_type == 'container':
+            # Fetch container logs
+            if not container_id:
+                return jsonify({"error": "Container ID required for container logs"}), 400
+            
+            # Extract application ID from container ID if needed
+            app_id_match = re.match(r'(application_\d+_\d+)', container_id)
+            if not app_id_match:
+                return jsonify({"error": "Invalid container ID format"}), 400
+                
+            application_id = app_id_match.group(1)
+            container_log_prefix = f"logs/containers/{application_id}/{container_id}"
+            
+            log_files = {
+                'stdout': f"{container_log_prefix}/stdout",
+                'stderr': f"{container_log_prefix}/stderr"
+            }
+            
+            log_file = request.args.get('file', 'stdout')
+            if log_file not in log_files:
+                return jsonify({"error": "Invalid log file for container"}), 400
+                
+            s3_key = log_files[log_file]
+            
+            try:
+                # Download the log file (container logs are not gzipped)
+                response = s3.get_object(Bucket=S3_LOG_BUCKET, Key=s3_key)
+                content = response['Body'].read().decode('utf-8', errors='replace')
+                
+                # Split into lines for pagination
+                lines = content.split('\n')
+                total_lines = len(lines)
+                
+                # Get requested lines
+                end_line = min(start_line + num_lines, total_lines)
+                requested_lines = lines[start_line:end_line]
+                
+                return jsonify({
+                    'lines': requested_lines,
+                    'totalLines': total_lines,
+                    'startLine': start_line,
+                    'endLine': end_line,
+                    'hasMore': end_line < total_lines,
+                    'containerId': container_id,
+                    'logType': 'container',
+                    'logFile': log_file
+                })
+                
+            except s3.exceptions.NoSuchKey:
+                app.logger.warning(f"Container log file not found: {s3_key}")
+                return jsonify({
+                    'lines': [f"Container log file not found: {log_file}"],
+                    'totalLines': 1,
+                    'error': 'Log file not found'
+                }), 404
+        
+        else:
+            return jsonify({"error": "Invalid log type"}), 400
+            
+    except Exception as e:
+        app.logger.error(f"Error fetching logs: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+@app.route(f'{URL_PREFIX}/clusters/<cluster_id>/steps/<step_id>/logs/containers', methods=['GET'])
+def list_step_containers(cluster_id, step_id):
+    """List all containers for a step based on its application ID"""
+    try:
+        app.logger.debug(f"Listing containers for step {step_id}")
+        
+        # First, get the application ID from stderr.gz
+        step_log_key = f"logs/steps/{step_id}/stderr.gz"
+        
+        try:
+            response = s3.get_object(Bucket=S3_LOG_BUCKET, Key=step_log_key)
+            compressed_content = response['Body'].read()
+            
+            with gzip.GzipFile(fileobj=BytesIO(compressed_content)) as gz:
+                content = gz.read().decode('utf-8', errors='replace')
+            
+            # Find application ID
+            app_id_pattern = r'application_\d+_\d+'
+            matches = re.findall(app_id_pattern, content)
+            
+            if not matches:
+                return jsonify({
+                    'containers': [],
+                    'message': 'No application ID found in step logs'
+                })
+            
+            application_id = matches[0]
+            app.logger.debug(f"Found application ID: {application_id}")
+            
+            # List containers under this application
+            prefix = f"logs/containers/{application_id}/"
+            response = s3.list_objects_v2(
+                Bucket=S3_LOG_BUCKET,
+                Prefix=prefix,
+                Delimiter='/'
+            )
+            
+            containers = []
+            if 'CommonPrefixes' in response:
+                for prefix_info in response['CommonPrefixes']:
+                    container_path = prefix_info['Prefix']
+                    container_id = container_path.rstrip('/').split('/')[-1]
+                    
+                    # Determine if this is the driver container
+                    is_driver = container_id.endswith('_000001')
+                    
+                    containers.append({
+                        'id': container_id,
+                        'label': 'Driver' if is_driver else f'Executor ({container_id.split("_")[-1]})',
+                        'isDriver': is_driver
+                    })
+            
+            # Sort containers so driver comes first
+            containers.sort(key=lambda x: (not x['isDriver'], x['id']))
+            
+            return jsonify({
+                'applicationId': application_id,
+                'containers': containers
+            })
+            
+        except s3.exceptions.NoSuchKey:
+            return jsonify({
+                'containers': [],
+                'error': 'Step logs not found'
+            }), 404
+            
+    except Exception as e:
+        app.logger.error(f"Error listing containers: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+@app.route(f'{URL_PREFIX}/clusters/<cluster_id>/steps/<step_id>/logs/download', methods=['GET'])
+def download_step_logs(cluster_id, step_id):
+    """Download log file"""
+    try:
+        log_type = request.args.get('type', 'step')
+        log_file = request.args.get('file', 'stderr')
+        container_id = request.args.get('container')
+        
+        if log_type == 'step':
+            s3_key = f"logs/steps/{step_id}/{log_file}.gz"
+            filename = f"{step_id}_{log_file}.log"
+            
+            # Download and decompress
+            response = s3.get_object(Bucket=S3_LOG_BUCKET, Key=s3_key)
+            compressed_content = response['Body'].read()
+            
+            with gzip.GzipFile(fileobj=BytesIO(compressed_content)) as gz:
+                content = gz.read()
+                
+        elif log_type == 'container':
+            if not container_id:
+                return jsonify({"error": "Container ID required"}), 400
+                
+            app_id_match = re.match(r'(application_\d+_\d+)', container_id)
+            if not app_id_match:
+                return jsonify({"error": "Invalid container ID"}), 400
+                
+            application_id = app_id_match.group(1)
+            s3_key = f"logs/containers/{application_id}/{container_id}/{log_file}"
+            filename = f"{container_id}_{log_file}.log"
+            
+            # Download (not compressed)
+            response = s3.get_object(Bucket=S3_LOG_BUCKET, Key=s3_key)
+            content = response['Body'].read()
+        
+        else:
+            return jsonify({"error": "Invalid log type"}), 400
+        
+        # Return as downloadable file
+        return Response(
+            content,
+            mimetype='text/plain',
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"',
+                'Content-Type': 'text/plain; charset=utf-8'
+            }
+        )
+        
+    except s3.exceptions.NoSuchKey:
+        return jsonify({"error": "Log file not found"}), 404
+    except Exception as e:
+        app.logger.error(f"Error downloading logs: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route(f'{URL_PREFIX}/health', methods=['GET'])
