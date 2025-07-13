@@ -209,6 +209,22 @@ class EMRService {
       throw error;
     }
   }
+
+  async analyzeStep(clusterId, stepId) {
+    const response = await fetch(`${API_BASE_URL}/clusters/${clusterId}/steps/${stepId}/analyze`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to analyze step');
+    }
+    
+    return response.json();
+  }
 }
 
 export default new EMRService();

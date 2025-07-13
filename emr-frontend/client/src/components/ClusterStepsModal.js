@@ -4,6 +4,7 @@ import LoadingSpinner from './LoadingSpinner';
 import StepDetailsModal from './StepDetailsModal';
 import StepDuplicationModal from './StepDuplicationModal';
 import StepLogsModal from './StepLogsModal';
+import StepAnalysisModal from './StepAnalysisModal';
 import Pagination from './Pagination';
 import { formatDate } from '../utils/formatters';
 import toast from 'react-hot-toast';
@@ -16,6 +17,7 @@ const ClusterStepsModal = ({ cluster, onClose }) => {
   const [showStepDetails, setShowStepDetails] = useState(false);
   const [showDuplicationModal, setShowDuplicationModal] = useState(false);
   const [showLogsModal, setShowLogsModal] = useState(false);
+  const [showAnalysisModal, setShowAnalysisModal] = useState(false);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -67,6 +69,11 @@ const ClusterStepsModal = ({ cluster, onClose }) => {
   const handleViewLogs = (step) => {
     setSelectedStep(step);
     setShowLogsModal(true);
+  };
+
+  const handleAnalyzeStep = (step) => {
+    setSelectedStep(step);
+    setShowAnalysisModal(true);
   };
 
   const handleCancelStep = async (step) => {
@@ -200,6 +207,12 @@ const ClusterStepsModal = ({ cluster, onClose }) => {
                                         </button>
                                       )}
                                       <button
+                                        onClick={() => handleAnalyzeStep(step)}
+                                        className="text-indigo-600 hover:text-indigo-900 mr-3"
+                                      >
+                                        Analyze
+                                      </button>
+                                      <button
                                         onClick={() => handleDuplicate(step)}
                                         className="text-green-600 hover:text-green-900 mr-3"
                                       >
@@ -273,6 +286,14 @@ const ClusterStepsModal = ({ cluster, onClose }) => {
           cluster={cluster}
           step={selectedStep}
           onClose={() => setShowLogsModal(false)}
+        />
+      )}
+
+      {showAnalysisModal && selectedStep && (
+        <StepAnalysisModal
+          cluster={cluster}
+          step={selectedStep}
+          onClose={() => setShowAnalysisModal(false)}
         />
       )}
     </>

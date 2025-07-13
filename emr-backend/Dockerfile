@@ -16,11 +16,23 @@ LABEL org.opencontainers.image.title="emr-cluster-manager"
 ENV APP_NAME="emr-cluster-manager"
 ENV PORT="3700"
 
+# Azure OpenAI Configuration - Service Principal Authentication
+ENV AZURE_OPENAI_ENDPOINT=""
+ENV AZURE_OPENAI_API_VERSION="2024-02-15-preview"
+ENV AZURE_OPENAI_DEPLOYMENT_NAME=""
+ENV AZURE_TENANT_ID=""
+ENV AZURE_SPN_CLIENT_ID=""
+
 # Set the working directory
 WORKDIR /app
 
 # Create logs directory
 RUN mkdir -p /app/logs
+
+# Copy Azure PEM certificate (place azure_cert.pem in the same directory as Dockerfile)
+# This file should NOT be committed to git
+COPY azure_cert.pem /app/azure_cert.pem
+RUN chmod 600 /app/azure_cert.pem
 
 # Install and run the app
 COPY dist /app/dist

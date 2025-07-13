@@ -63,3 +63,7 @@ htmlcov/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Azure OpenAI PEM certificate
+azure_cert.pem
+**/azure_cert.pem

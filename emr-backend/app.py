@@ -11,6 +11,8 @@ from botocore.exceptions import ClientError, BotoCoreError
 import gzip
 import re
 from io import BytesIO
+from azure.identity import CertificateCredential
+from openai import AzureOpenAI
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -99,6 +101,44 @@ LAMBDA_FUNCTION_NAMES = {
 
 # S3 log bucket for all UAT environments
 S3_LOG_BUCKET = 'app-id-107923-dep-id-107924-uu-id-mpm6sfacq4a8'
+
+# Azure OpenAI Configuration - Service Principal Authentication
+AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT', '')
+AZURE_OPENAI_API_VERSION = os.getenv('AZURE_OPENAI_API_VERSION', '2024-02-15-preview')
+AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', '')
+AZURE_TENANT_ID = os.getenv('AZURE_TENANT_ID', '')
+AZURE_SPN_CLIENT_ID = os.getenv('AZURE_SPN_CLIENT_ID', '')
+AZURE_PEM_PATH = '/app/azure_cert.pem'
+
+# Initialize Azure OpenAI client if credentials are available
+azure_openai_client = None
+AZURE_OPENAI_ENABLED = False
+
+if all([AZURE_OPENAI_ENDPOINT, AZURE_TENANT_ID, AZURE_SPN_CLIENT_ID, AZURE_OPENAI_DEPLOYMENT_NAME]):
+    if os.path.exists(AZURE_PEM_PATH):
+        try:
+            # Create credential using Service Principal with certificate
+            credential = CertificateCredential(
+                tenant_id=AZURE_TENANT_ID,
+                client_id=AZURE_SPN_CLIENT_ID,
+                certificate_path=AZURE_PEM_PATH
+            )
+            
+            # Initialize Azure OpenAI client
+            azure_openai_client = AzureOpenAI(
+                azure_endpoint=AZURE_OPENAI_ENDPOINT,
+                api_version=AZURE_OPENAI_API_VERSION,
+                azure_ad_token_provider=credential.get_token
+            )
+            
+            AZURE_OPENAI_ENABLED = True
+            app.logger.info("Azure OpenAI integration enabled with Service Principal authentication")
+        except Exception as e:
+            app.logger.error(f"Failed to initialize Azure OpenAI client: {str(e)}")
+    else:
+        app.logger.warning(f"Azure PEM certificate not found at {AZURE_PEM_PATH}")
+else:
+    app.logger.warning("Azure OpenAI credentials incomplete - step analysis feature disabled")
 
 # Request logging middleware
 @app.before_request
@@ -785,6 +825,167 @@ def download_step_logs(cluster_id, step_id):
     except Exception as e:
         app.logger.error(f"Error downloading logs: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
+@app.route(f'{URL_PREFIX}/clusters/<cluster_id>/steps/<step_id>/analyze', methods=['POST'])
+def analyze_step(cluster_id, step_id):
+    """Analyze step execution using Azure OpenAI"""
+    if not AZURE_OPENAI_ENABLED:
+        return jsonify({"error": "Step analysis feature is not available"}), 503
+    
+    try:
+        app.logger.info(f"Analyzing step {step_id} for cluster {cluster_id}")
+        
+        # Get step details first
+        response = emr.describe_step(ClusterId=cluster_id, StepId=step_id)
+        step = response['Step']
+        step_state = step['Status']['State']
+        step_name = step.get('Name', 'Unknown')
+        
+        # Fetch stderr.gz for timeline
+        stderr_content = ""
+        timeline_info = ""
+        try:
+            stderr_key = f"logs/{cluster_id}/steps/{step_id}/stderr.gz"
+            response = s3.get_object(Bucket=S3_LOG_BUCKET, Key=stderr_key)
+            compressed_content = response['Body'].read()
+            
+            with gzip.GzipFile(fileobj=BytesIO(compressed_content)) as gz:
+                stderr_content = gz.read().decode('utf-8', errors='replace')
+            
+            # Extract timeline from stderr (looking for state transitions)
+            timeline_lines = []
+            for line in stderr_content.split('\n'):
+                if 'ACCEPTED' in line or 'RUNNING' in line or 'COMPLETED' in line or 'FAILED' in line:
+                    timeline_lines.append(line.strip())
+                    if len(timeline_lines) > 20:  # Limit timeline info
+                        break
+            timeline_info = '\n'.join(timeline_lines[-20:])  # Last 20 timeline entries
+            
+        except Exception as e:
+            app.logger.warning(f"Could not fetch stderr for timeline: {str(e)}")
+        
+        # Fetch driver logs
+        driver_log_content = ""
+        try:
+            # First, find the driver container
+            if stderr_content:
+                app_id_matches = re.findall(r'application_\d+_\d+', stderr_content)
+                if app_id_matches:
+                    application_id = app_id_matches[0]
+                    
+                    # List containers
+                    prefix = f"logs/{cluster_id}/containers/{application_id}/"
+                    response = s3.list_objects_v2(
+                        Bucket=S3_LOG_BUCKET,
+                        Prefix=prefix,
+                        Delimiter='/'
+                    )
+                    
+                    # Find driver container (ends with _000001)
+                    driver_container = None
+                    if 'CommonPrefixes' in response:
+                        for prefix_info in response['CommonPrefixes']:
+                            container_id = prefix_info['Prefix'].rstrip('/').split('/')[-1]
+                            if container_id.endswith('_000001'):
+                                driver_container = container_id
+                                break
+                    
+                    if driver_container:
+                        # Fetch driver stdout
+                        driver_key = f"logs/{cluster_id}/containers/{application_id}/{driver_container}/stdout.gz"
+                        response = s3.get_object(Bucket=S3_LOG_BUCKET, Key=driver_key)
+                        compressed_content = response['Body'].read()
+                        
+                        with gzip.GzipFile(fileobj=BytesIO(compressed_content)) as gz:
+                            full_content = gz.read().decode('utf-8', errors='replace')
+                        
+                        # Extract relevant sections based on step state
+                        if step_state == 'FAILED':
+                            # For failures, get last 2000 lines focusing on errors
+                            lines = full_content.split('\n')
+                            error_lines = []
+                            for i, line in enumerate(lines):
+                                if 'ERROR' in line or 'Exception' in line or 'Error' in line:
+                                    # Get context around error (5 lines before and after)
+                                    start = max(0, i - 5)
+                                    end = min(len(lines), i + 6)
+                                    error_lines.extend(lines[start:end])
+                                    error_lines.append("---")
+                            
+                            if error_lines:
+                                driver_log_content = '\n'.join(error_lines[-1000:])  # Last 1000 lines of errors
+                            else:
+                                # No specific errors found, get last 1000 lines
+                                driver_log_content = '\n'.join(lines[-1000:])
+                        else:
+                            # For successful runs, get summary info
+                            lines = full_content.split('\n')
+                            summary_lines = []
+                            
+                            # Look for execution metrics
+                            for line in lines:
+                                if any(keyword in line for keyword in [
+                                    'Job finished:', 'Total time:', 'Records written:',
+                                    'Shuffle', 'Stage', 'Task', 'Executor',
+                                    'WARN', 'physical plan', 'logical plan'
+                                ]):
+                                    summary_lines.append(line.strip())
+                                    if len(summary_lines) > 500:
+                                        break
+                            
+                            driver_log_content = '\n'.join(summary_lines[:500])
+                            
+        except Exception as e:
+            app.logger.warning(f"Could not fetch driver logs: {str(e)}")
+        
+        # Prepare prompt for Azure OpenAI
+        prompt = f"""Analyze this EMR step execution and provide a concise summary:
+
+Step Name: {step_name}
+Step State: {step_state}
+Step ID: {step_id}
+
+Timeline from stderr (state transitions):
+{timeline_info}
+
+Driver Execution Log:
+{driver_log_content}
+
+Please provide:
+1. Execution Summary (2-3 sentences explaining what happened)
+2. For failures: Root cause analysis and specific error
+3. For success: Key metrics and performance insights
+4. Wait time analysis (time spent in ACCEPTED state before RUNNING)
+5. Any warnings or optimization suggestions observed
+
+Keep the response under 300 words and focus on actionable insights."""
+
+        # Call Azure OpenAI
+        app.logger.info("Calling Azure OpenAI for analysis")
+        completion = azure_openai_client.chat.completions.create(
+            model=AZURE_OPENAI_DEPLOYMENT_NAME,
+            messages=[
+                {"role": "system", "content": "You are an expert in analyzing EMR/Spark job execution logs."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=500,
+            timeout=30
+        )
+        
+        analysis = completion.choices[0].message.content
+        
+        return jsonify({
+            'stepId': step_id,
+            'stepName': step_name,
+            'stepState': step_state,
+            'analysis': analysis,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error analyzing step: {str(e)}", exc_info=True)
+        return jsonify({"error": f"Failed to analyze step: {str(e)}"}), 500
 
 @app.route(f'{URL_PREFIX}/health', methods=['GET'])
 def health_check():
