@@ -1,4 +1,5 @@
-# Dockerfile
+# Dockerfile.template
+# This is a template file. Copy to Dockerfile and fill in your actual values
 
 # Use the specified base image
 FROM jetae-publish.prod.aws.jpmchase.net/container-base/managedbaseimages/python:3.13.3-stable
@@ -21,7 +22,7 @@ ENV URL_PREFIX=""
 # IMPORTANT: Replace these values with your actual credentials before building
 ENV AZURE_OPENAI_ENDPOINT="https://your-resource-name.openai.azure.com/"
 ENV AZURE_OPENAI_API_VERSION="2024-02-15-preview"
-ENV AZURE_OPENAI_DEPLOYMENT_NAME="gpt-4o-2024-08-06"
+ENV AZURE_OPENAI_DEPLOYMENT_NAME="your-deployment-name"
 ENV AZURE_OPENAI_API_KEY="your-openai-api-key-here"
 
 # Service Principal Configuration for Azure AD Token

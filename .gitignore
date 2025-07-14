@@ -67,3 +67,7 @@ htmlcov/
 # Azure OpenAI PEM certificate
 azure_cert.pem
 **/azure_cert.pem
+
+# SECURITY: Dockerfile with credentials (use Dockerfile.template instead)
+# Uncomment the line below if you've added credentials to your Dockerfile
+# emr-backend/Dockerfile
