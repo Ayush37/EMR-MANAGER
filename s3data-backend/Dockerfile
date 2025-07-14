@@ -24,10 +24,18 @@ WORKDIR /app
 # Create logs directory
 RUN mkdir -p /app/logs
 
+# Install build dependencies for pandas/pyarrow compilation
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    python3-dev \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install and run the app
 COPY dist /app/dist
 RUN chown -R jpmcnobody:jpmcnobody /app/ \
-    && pip install /app/dist/*.whl waitress toml
+    && pip install --no-cache-dir /app/dist/*.whl waitress toml
 
 # Expose the port
 EXPOSE $PORT
