@@ -162,10 +162,16 @@ else:
             )
             
             # Initialize Azure OpenAI client
+            # Define the token provider with the correct scope
+            def get_token_provider():
+                # Azure Cognitive Services scope
+                token = credential.get_token("https://cognitiveservices.azure.com/.default")
+                return token.token
+            
             azure_openai_client = AzureOpenAI(
                 azure_endpoint=AZURE_OPENAI_ENDPOINT,
                 api_version=AZURE_OPENAI_API_VERSION,
-                azure_ad_token_provider=credential.get_token
+                azure_ad_token_provider=get_token_provider
             )
             
             AZURE_OPENAI_ENABLED = True
