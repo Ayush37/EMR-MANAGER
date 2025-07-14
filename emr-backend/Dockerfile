@@ -15,7 +15,7 @@ LABEL org.opencontainers.image.title="emr-cluster-manager"
 # Add Application name and port to ENV
 ENV APP_NAME="emr-cluster-manager"
 ENV PORT="3700"
-ENV URL_PREFIX=""
+ENV URL_PREFIX="/api"
 
 # Azure OpenAI Configuration - Hybrid Authentication (Service Principal + API Key)
 # IMPORTANT: Replace these values with your actual credentials before building

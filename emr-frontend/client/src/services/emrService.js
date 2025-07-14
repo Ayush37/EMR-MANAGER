@@ -2,6 +2,19 @@
 // For local development, you can override with REACT_APP_API_URL env variable
 const API_BASE_URL = process.env.REACT_APP_API_URL || '/api';
 
+// Helper function to ensure API URLs are absolute from root
+function getApiUrl(path) {
+  // If API_BASE_URL is already absolute (starts with http), use as is
+  if (API_BASE_URL.startsWith('http')) {
+    return `${API_BASE_URL}${path}`;
+  }
+  
+  // For relative URLs, ensure they start from root
+  // This handles cases where the app is served from a subpath like /emr/
+  const base = API_BASE_URL.startsWith('/') ? API_BASE_URL : `/${API_BASE_URL}`;
+  return `${base}${path}`;
+}
+
 class EMRService {
   async handleResponse(response) {
     if (!response.ok) {
@@ -27,7 +40,7 @@ class EMRService {
         params.append('states', states.join(','));
       }
       
-      const response = await fetch(`${API_BASE_URL}/clusters?${params.toString()}`, {
+      const response = await fetch(getApiUrl(`/clusters?${params.toString()}`), {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -211,7 +224,10 @@ class EMRService {
   }
 
   async analyzeStep(clusterId, stepId) {
-    const response = await fetch(`${API_BASE_URL}/clusters/${encodeURIComponent(clusterId)}/steps/${encodeURIComponent(stepId)}/analyze`, {
+    const url = getApiUrl(`/clusters/${encodeURIComponent(clusterId)}/steps/${encodeURIComponent(stepId)}/analyze`);
+    console.log('Analyzing step with URL:', url); // Debug log
+    
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

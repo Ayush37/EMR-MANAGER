@@ -119,7 +119,19 @@ azure_openai_client = None
 AZURE_OPENAI_ENABLED = False
 
 # Check credentials and initialize Azure AD token provider
-app.logger.info("Checking Azure OpenAI hybrid authentication credentials...")
+app.logger.info("=" * 60)
+app.logger.info("Starting Azure OpenAI hybrid authentication initialization")
+app.logger.info("=" * 60)
+
+# Log all configuration (mask sensitive parts)
+app.logger.info(f"AZURE_OPENAI_ENDPOINT: {AZURE_OPENAI_ENDPOINT}")
+app.logger.info(f"AZURE_OPENAI_API_KEY: {'*' * 20}{AZURE_OPENAI_API_KEY[-4:] if AZURE_OPENAI_API_KEY else 'NOT SET'}")
+app.logger.info(f"AZURE_OPENAI_DEPLOYMENT_NAME: {AZURE_OPENAI_DEPLOYMENT_NAME}")
+app.logger.info(f"AZURE_OPENAI_API_VERSION: {AZURE_OPENAI_API_VERSION}")
+app.logger.info(f"AZURE_TENANT_ID: {AZURE_TENANT_ID[:8]}...{AZURE_TENANT_ID[-4:] if AZURE_TENANT_ID else 'NOT SET'}")
+app.logger.info(f"AZURE_SPN_CLIENT_ID: {AZURE_SPN_CLIENT_ID[:8]}...{AZURE_SPN_CLIENT_ID[-4:] if AZURE_SPN_CLIENT_ID else 'NOT SET'}")
+app.logger.info(f"AZURE_PEM_PATH: {AZURE_PEM_PATH}")
+app.logger.info(f"AZURE_USER_ID: {AZURE_USER_ID}")
 
 # Check OpenAI credentials
 openai_missing = []
@@ -138,6 +150,24 @@ if not AZURE_SPN_CLIENT_ID:
     sp_missing.append("AZURE_SPN_CLIENT_ID")
 if not os.path.exists(AZURE_PEM_PATH):
     sp_missing.append(f"PEM certificate at {AZURE_PEM_PATH}")
+else:
+    # Log PEM file details
+    try:
+        pem_stat = os.stat(AZURE_PEM_PATH)
+        app.logger.info(f"PEM file exists - Size: {pem_stat.st_size} bytes, Permissions: {oct(pem_stat.st_mode)[-3:]}")
+        
+        # Check if we can read the PEM file
+        with open(AZURE_PEM_PATH, 'r') as f:
+            pem_content = f.read()
+            if 'BEGIN CERTIFICATE' in pem_content:
+                app.logger.info("PEM file contains certificate")
+            if 'BEGIN PRIVATE KEY' in pem_content or 'BEGIN RSA PRIVATE KEY' in pem_content:
+                app.logger.info("PEM file contains private key")
+            if 'BEGIN ENCRYPTED PRIVATE KEY' in pem_content:
+                app.logger.warning("PEM file contains ENCRYPTED private key - this may cause issues")
+    except Exception as e:
+        app.logger.error(f"Error reading PEM file: {str(e)}")
+        sp_missing.append(f"PEM file read error: {str(e)}")
 
 if openai_missing or sp_missing:
     if openai_missing:
@@ -149,29 +179,51 @@ if openai_missing or sp_missing:
 else:
     try:
         # Initialize Service Principal credential for Azure AD token
-        app.logger.info("Initializing Service Principal authentication...")
+        app.logger.info("Step 1: Creating CertificateCredential...")
+        app.logger.info(f"  - Tenant ID: {AZURE_TENANT_ID}")
+        app.logger.info(f"  - Client ID: {AZURE_SPN_CLIENT_ID}")
+        app.logger.info(f"  - Certificate Path: {AZURE_PEM_PATH}")
+        
         credential = CertificateCredential(
             tenant_id=AZURE_TENANT_ID,
             client_id=AZURE_SPN_CLIENT_ID,
             certificate_path=AZURE_PEM_PATH
         )
+        app.logger.info("✓ CertificateCredential created successfully")
         
         # Test the credential and get initial token
-        app.logger.info("Testing Service Principal credential...")
-        token_response = credential.get_token("https://cognitiveservices.azure.com/.default")
-        access_token = token_response.token
-        app.logger.info("Successfully obtained Azure AD access token")
+        app.logger.info("Step 2: Requesting Azure AD token...")
+        app.logger.info("  - Scope: https://cognitiveservices.azure.com/.default")
+        
+        try:
+            token_response = credential.get_token("https://cognitiveservices.azure.com/.default")
+            access_token = token_response.token
+            app.logger.info(f"✓ Successfully obtained Azure AD access token")
+            app.logger.info(f"  - Token length: {len(access_token)} characters")
+            app.logger.info(f"  - Token preview: {access_token[:20]}...{access_token[-20:]}")
+            app.logger.info(f"  - Expires on: {datetime.fromtimestamp(token_response.expires_on).isoformat()}")
+        except Exception as token_error:
+            app.logger.error(f"✗ Failed to get Azure AD token: {str(token_error)}")
+            app.logger.error(f"  - Error type: {type(token_error).__name__}")
+            if hasattr(token_error, 'error'):
+                app.logger.error(f"  - Error code: {getattr(token_error, 'error', 'N/A')}")
+            if hasattr(token_error, 'error_description'):
+                app.logger.error(f"  - Error description: {getattr(token_error, 'error_description', 'N/A')}")
+            raise
         
         # Initialize Azure OpenAI client with API key and custom headers
-        app.logger.info(f"Initializing Azure OpenAI with endpoint: {AZURE_OPENAI_ENDPOINT}")
-        app.logger.info(f"Using deployment: {AZURE_OPENAI_DEPLOYMENT_NAME}")
-        app.logger.info(f"API version: {AZURE_OPENAI_API_VERSION}")
+        app.logger.info("Step 3: Creating Azure OpenAI client...")
+        app.logger.info(f"  - Endpoint: {AZURE_OPENAI_ENDPOINT}")
+        app.logger.info(f"  - Deployment: {AZURE_OPENAI_DEPLOYMENT_NAME}")
+        app.logger.info(f"  - API Version: {AZURE_OPENAI_API_VERSION}")
+        app.logger.info(f"  - API Key: {'*' * 30}{AZURE_OPENAI_API_KEY[-4:]}")
         
         # Create headers with Bearer token and user ID
         default_headers = {
             "Authorization": f"Bearer {access_token}",
             "x-ms-useragent": AZURE_USER_ID
         }
+        app.logger.info(f"  - Headers: Authorization=Bearer..., x-ms-useragent={AZURE_USER_ID}")
         
         azure_openai_client = AzureOpenAI(
             azure_endpoint=AZURE_OPENAI_ENDPOINT,
@@ -184,29 +236,38 @@ else:
         azure_openai_client._credential = credential
         
         AZURE_OPENAI_ENABLED = True
-        app.logger.info("Azure OpenAI integration enabled with hybrid authentication (Service Principal + API Key)")
+        app.logger.info("✓ Azure OpenAI client created successfully")
+        app.logger.info("=" * 60)
+        app.logger.info("Azure OpenAI integration ENABLED - Hybrid authentication ready")
+        app.logger.info("=" * 60)
         
     except Exception as e:
-        app.logger.error(f"Failed to initialize Azure OpenAI client: {str(e)}")
-        app.logger.error(f"Error type: {type(e).__name__}")
+        app.logger.error("✗ Failed to initialize Azure OpenAI client")
+        app.logger.error(f"  - Error: {str(e)}")
+        app.logger.error(f"  - Error type: {type(e).__name__}")
+        app.logger.error(f"  - Full traceback:", exc_info=True)
         AZURE_OPENAI_ENABLED = False
 
 def refresh_azure_token():
     """Refresh Azure AD token and update OpenAI client headers"""
     if not AZURE_OPENAI_ENABLED or not hasattr(azure_openai_client, '_credential'):
+        app.logger.warning("Token refresh skipped - Azure OpenAI not enabled or credential not available")
         return
     
     try:
-        app.logger.debug("Refreshing Azure AD token...")
+        app.logger.info("Refreshing Azure AD token...")
         token_response = azure_openai_client._credential.get_token("https://cognitiveservices.azure.com/.default")
         access_token = token_response.token
         
         # Update the default headers with new token
         azure_openai_client.default_headers["Authorization"] = f"Bearer {access_token}"
-        app.logger.debug("Azure AD token refreshed successfully")
+        app.logger.info(f"✓ Azure AD token refreshed successfully")
+        app.logger.debug(f"  - New token preview: {access_token[:20]}...{access_token[-20:]}")
+        app.logger.debug(f"  - Expires on: {datetime.fromtimestamp(token_response.expires_on).isoformat()}")
         
     except Exception as e:
-        app.logger.error(f"Failed to refresh Azure AD token: {str(e)}")
+        app.logger.error(f"✗ Failed to refresh Azure AD token: {str(e)}")
+        app.logger.error(f"  - Error type: {type(e).__name__}")
         raise
 
 # Request logging middleware
@@ -1062,8 +1123,18 @@ Keep the response under 300 words and focus on actionable insights."""
         
         for attempt in range(max_retries):
             try:
+                app.logger.info(f"Attempt {attempt + 1}/{max_retries} - Making Azure OpenAI API call")
+                
                 # Refresh Azure AD token before making API call
                 refresh_azure_token()
+                
+                # Log the actual API call details
+                app.logger.info("Making chat.completions.create call:")
+                app.logger.info(f"  - Model: {AZURE_OPENAI_DEPLOYMENT_NAME}")
+                app.logger.info(f"  - Temperature: 0.3")
+                app.logger.info(f"  - Max tokens: 500")
+                app.logger.info(f"  - Timeout: 30 seconds")
+                app.logger.debug(f"  - Current headers: {list(azure_openai_client.default_headers.keys())}")
                 
                 completion = azure_openai_client.chat.completions.create(
                     model=AZURE_OPENAI_DEPLOYMENT_NAME,
@@ -1077,16 +1148,37 @@ Keep the response under 300 words and focus on actionable insights."""
                 )
                 
                 analysis = completion.choices[0].message.content
-                app.logger.info(f"Azure OpenAI analysis completed, response length: {len(analysis)} characters")
+                app.logger.info(f"✓ Azure OpenAI analysis completed successfully")
+                app.logger.info(f"  - Response length: {len(analysis)} characters")
+                app.logger.info(f"  - Model used: {completion.model}")
+                app.logger.info(f"  - Tokens used: {completion.usage.total_tokens if completion.usage else 'N/A'}")
                 break
                 
             except Exception as e:
-                app.logger.warning(f"Azure OpenAI attempt {attempt + 1} failed: {str(e)}")
+                app.logger.error(f"✗ Azure OpenAI attempt {attempt + 1} failed")
+                app.logger.error(f"  - Error: {str(e)}")
+                app.logger.error(f"  - Error type: {type(e).__name__}")
+                
+                # Log specific error details for common issues
+                error_str = str(e).lower()
+                if 'authentication' in error_str or 'unauthorized' in error_str:
+                    app.logger.error("  - This appears to be an authentication error")
+                    app.logger.error("  - Check: API key, token, tenant ID, client ID, and permissions")
+                elif 'not found' in error_str:
+                    app.logger.error("  - This appears to be a deployment/model not found error")
+                    app.logger.error(f"  - Check: Deployment name '{AZURE_OPENAI_DEPLOYMENT_NAME}' exists in your Azure OpenAI resource")
+                elif 'timeout' in error_str:
+                    app.logger.error("  - This appears to be a timeout error")
+                    app.logger.error("  - The API call took too long to respond")
+                
                 if attempt < max_retries - 1:
+                    wait_time = retry_delay * (attempt + 1)
+                    app.logger.info(f"  - Waiting {wait_time} seconds before retry...")
                     import time
-                    time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                    time.sleep(wait_time)
                 else:
-                    app.logger.error(f"Azure OpenAI API error after {max_retries} attempts: {str(e)}", exc_info=True)
+                    app.logger.error(f"✗ All {max_retries} attempts failed")
+                    app.logger.error("Full error details:", exc_info=True)
                     return jsonify({"error": f"Failed to get AI analysis after {max_retries} attempts: {str(e)}"}), 500
         
         return jsonify({
@@ -1109,6 +1201,53 @@ def health_check():
         'service': 'emr-backend',
         'timestamp': datetime.now().isoformat()
     })
+
+@app.route(f'{URL_PREFIX}/test-azure-openai', methods=['GET'])
+def test_azure_openai():
+    """Test endpoint to verify Azure OpenAI connection"""
+    if not AZURE_OPENAI_ENABLED:
+        return jsonify({
+            'status': 'disabled',
+            'message': 'Azure OpenAI is not enabled. Check logs for configuration issues.'
+        }), 503
+    
+    try:
+        app.logger.info("Testing Azure OpenAI connection...")
+        
+        # Refresh token
+        refresh_azure_token()
+        
+        # Make a simple test call
+        app.logger.info("Making test API call to Azure OpenAI...")
+        completion = azure_openai_client.chat.completions.create(
+            model=AZURE_OPENAI_DEPLOYMENT_NAME,
+            messages=[
+                {"role": "user", "content": "Say 'Azure OpenAI is working!' in exactly 5 words."}
+            ],
+            temperature=0,
+            max_tokens=20,
+            timeout=10
+        )
+        
+        response_text = completion.choices[0].message.content
+        app.logger.info(f"✓ Test successful! Response: {response_text}")
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Azure OpenAI connection verified',
+            'response': response_text,
+            'model': completion.model,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        app.logger.error(f"✗ Test failed: {str(e)}", exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'message': f'Azure OpenAI test failed: {str(e)}',
+            'error_type': type(e).__name__,
+            'timestamp': datetime.now().isoformat()
+        }), 500
 
 @app.route(f'{URL_PREFIX}/debug/routes', methods=['GET'])
 def debug_routes():
