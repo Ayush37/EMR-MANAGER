@@ -89,14 +89,38 @@ S3_BUCKETS = {
 def log_request_info():
     """Log request information"""
     app.logger.debug(f'{request.method} {request.path} - IP: {request.remote_addr}')
-    if request.json:
-        app.logger.debug(f'Request body: {json.dumps(request.json)}')
+    
+    # Only try to parse JSON if content-type is application/json
+    if request.content_type and 'application/json' in request.content_type:
+        try:
+            body = request.get_json()
+            if body:
+                app.logger.debug(f'Request body: {json.dumps(body)}')
+        except Exception as e:
+            app.logger.debug(f'Failed to parse request body: {str(e)}')
 
 @app.after_request
 def log_response_info(response):
     """Log response information"""
     app.logger.debug(f'{request.method} {request.path} - Status: {response.status_code}')
     return response
+
+@app.route(f'{URL_PREFIX}/', methods=['GET'])
+@app.route(f'{URL_PREFIX}', methods=['GET'])
+def index():
+    """Root endpoint that returns service information"""
+    return jsonify({
+        'service': 's3data-viewer',
+        'version': '1.0.0',
+        'status': 'healthy',
+        'endpoints': {
+            'list': f'{URL_PREFIX}/list',
+            'preview': f'{URL_PREFIX}/preview',
+            'download': f'{URL_PREFIX}/download',
+            'health': f'{URL_PREFIX}/health'
+        },
+        'timestamp': datetime.now().isoformat()
+    })
 
 @app.route(f'{URL_PREFIX}/list', methods=['GET'])
 def list_objects():

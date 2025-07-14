@@ -17,6 +17,7 @@ ENV APP_NAME="s3data-viewer"
 ENV PORT="3700"
 ENV LOG_LEVEL="INFO"
 ENV USE_IAM_ROLE="true"
+ENV URL_PREFIX="/s3data-api"
 
 # Set the working directory
 WORKDIR /app
