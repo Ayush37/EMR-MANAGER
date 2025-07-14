@@ -173,11 +173,26 @@ else:
             except Exception as e:
                 app.logger.error(f"Failed to read PEM file: {str(e)}")
             
-            credential = CertificateCredential(
-                tenant_id=AZURE_TENANT_ID,
-                client_id=AZURE_SPN_CLIENT_ID,
-                certificate_path=AZURE_PEM_PATH
-            )
+            # Try to create credential and test it immediately
+            try:
+                credential = CertificateCredential(
+                    tenant_id=AZURE_TENANT_ID,
+                    client_id=AZURE_SPN_CLIENT_ID,
+                    certificate_path=AZURE_PEM_PATH
+                )
+                app.logger.info("CertificateCredential created successfully")
+                
+                # Test the credential immediately
+                test_token = credential.get_token("https://cognitiveservices.azure.com/.default")
+                app.logger.info("Test token acquired successfully")
+            except Exception as e:
+                app.logger.error(f"Failed to create/test credential: {str(e)}")
+                app.logger.error(f"This usually means:")
+                app.logger.error("1. The PEM file doesn't contain the private key")
+                app.logger.error("2. The certificate is not registered with the Service Principal")
+                app.logger.error("3. The Service Principal doesn't have the required permissions")
+                app.logger.error("4. The tenant ID or client ID is incorrect")
+                raise
             
             # Initialize Azure OpenAI client
             # Cache for the token
