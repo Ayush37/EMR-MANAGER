@@ -219,8 +219,17 @@ class EMRService {
     });
     
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to analyze step');
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to analyze step');
+      } else {
+        // Response is not JSON (probably HTML error page)
+        const text = await response.text();
+        console.error('Non-JSON error response:', text);
+        throw new Error(`Server error (${response.status}): Unable to analyze step`);
+      }
     }
     
     return response.json();

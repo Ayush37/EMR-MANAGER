@@ -19,8 +19,9 @@ const StepAnalysisModal = ({ cluster, step, onClose }) => {
       const response = await emrService.analyzeStep(cluster.clusterId, step.id);
       setAnalysis(response);
     } catch (err) {
+      console.error('Analysis error:', err);
       setError(err.message || 'Failed to analyze step');
-      toast.error('Failed to analyze step');
+      toast.error(err.message || 'Failed to analyze step');
     } finally {
       setLoading(false);
     }
