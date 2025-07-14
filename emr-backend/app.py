@@ -114,7 +114,38 @@ AZURE_PEM_PATH = '/app/azure_cert.pem'
 azure_openai_client = None
 AZURE_OPENAI_ENABLED = False
 
-if all([AZURE_OPENAI_ENDPOINT, AZURE_TENANT_ID, AZURE_SPN_CLIENT_ID, AZURE_OPENAI_DEPLOYMENT_NAME]):
+# Check which credentials are available
+app.logger.info("Checking Azure OpenAI credentials...")
+missing_credentials = []
+found_credentials = []
+
+if AZURE_OPENAI_ENDPOINT:
+    found_credentials.append(f"AZURE_OPENAI_ENDPOINT={AZURE_OPENAI_ENDPOINT}")
+else:
+    missing_credentials.append("AZURE_OPENAI_ENDPOINT")
+    
+if AZURE_TENANT_ID:
+    found_credentials.append(f"AZURE_TENANT_ID={AZURE_TENANT_ID[:8]}...")
+else:
+    missing_credentials.append("AZURE_TENANT_ID")
+    
+if AZURE_SPN_CLIENT_ID:
+    found_credentials.append(f"AZURE_SPN_CLIENT_ID={AZURE_SPN_CLIENT_ID[:8]}...")
+else:
+    missing_credentials.append("AZURE_SPN_CLIENT_ID")
+    
+if AZURE_OPENAI_DEPLOYMENT_NAME:
+    found_credentials.append(f"AZURE_OPENAI_DEPLOYMENT_NAME={AZURE_OPENAI_DEPLOYMENT_NAME}")
+else:
+    missing_credentials.append("AZURE_OPENAI_DEPLOYMENT_NAME")
+
+if found_credentials:
+    app.logger.info(f"Found credentials: {', '.join(found_credentials)}")
+
+if missing_credentials:
+    app.logger.warning(f"Azure OpenAI credentials incomplete. Missing: {', '.join(missing_credentials)}")
+    app.logger.warning("Step analysis feature disabled due to missing credentials")
+else:
     if os.path.exists(AZURE_PEM_PATH):
         try:
             # Create credential using Service Principal with certificate
@@ -141,10 +172,10 @@ if all([AZURE_OPENAI_ENDPOINT, AZURE_TENANT_ID, AZURE_SPN_CLIENT_ID, AZURE_OPENA
             app.logger.info("Azure OpenAI integration enabled successfully with Service Principal authentication")
         except Exception as e:
             app.logger.error(f"Failed to initialize Azure OpenAI client: {str(e)}")
+            app.logger.error(f"Error type: {type(e).__name__}")
     else:
         app.logger.warning(f"Azure PEM certificate not found at {AZURE_PEM_PATH}")
-else:
-    app.logger.warning("Azure OpenAI credentials incomplete - step analysis feature disabled")
+        app.logger.warning("Step analysis feature disabled due to missing PEM certificate")
 
 # Request logging middleware
 @app.before_request
