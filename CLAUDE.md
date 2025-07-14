@@ -2,50 +2,98 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Current Status (Last Updated: 2025-07-13)
+## Current Status (Last Updated: 2025-07-14)
 
 ### Working Features
 - ✅ EMR cluster management with multi-environment support (UAT1/2/3)
 - ✅ Advanced filtering: search across all clusters, multi-state filtering
 - ✅ Step management: view, duplicate, cancel steps
 - ✅ SSM parameter management with full CRUD
-- ✅ Both services deployed to ECS with ALB routing
+- ✅ **S3 Data Viewer service** (NEW) - Browse and preview parquet files
+- ✅ All three services deployed to ECS with ALB routing
 - ✅ IAM role-based authentication for ECS
-- ✅ Health checks configured for ECS
-- ✅ Step logs viewer (implemented) - View stdout/stderr from S3 for both steps and containers
-- ✅ AI-powered step analysis using Azure OpenAI (implemented)
+- ✅ Health checks configured for ECS (dual endpoints)
+- ✅ Step logs viewer - View stdout/stderr from S3 for both steps and containers
+- ✅ AI-powered step analysis using Azure OpenAI (hybrid auth)
 
-### Recent Session Work (2025-07-13)
-1. **Fixed Container Logs Issues**:
-   - Added cluster_id to container log S3 paths
-   - Fixed container ID validation (removed application_ pattern requirement)
-   - Added applicationId parameter passing from frontend
-   - Fixed stdout.gz file handling (both stdout and stderr are gzipped)
+### Recent Session Work (2025-07-14)
 
-2. **UI Improvements**:
-   - Moved "View Logs" button from Step Details modal to main Steps table
-   - Added alongside Details, Duplicate buttons for easier access
-   - Used purple color scheme for Logs button
+1. **S3 Data Viewer Service Implementation**:
+   - Full service implementation following established patterns
+   - Backend: Flask app at `/s3data-api/*`
+   - Frontend: React app at `/s3data/*`
+   - Features:
+     - List S3 objects with folder navigation
+     - Preview parquet files (up to 500 rows)
+     - Download original parquet files
+     - Export to CSV format (Excel removed due to pandas issues)
+   - Multi-environment support (UAT1/2/3) with RAW/REFINED buckets
 
-3. **Implemented AI Step Analysis**:
-   - Azure OpenAI integration with Service Principal + PEM authentication
-   - New endpoint: POST /api/clusters/{cluster_id}/steps/{step_id}/analyze
-   - Fetches stderr.gz (timeline) and driver stdout.gz (execution details)
-   - Provides AI-generated insights on failures, performance, and optimizations
-   - Added comprehensive CloudWatch logging for troubleshooting
+2. **Pandas Dependency Removal**:
+   - Removed pandas from S3 Data backend to avoid Docker build issues
+   - Refactored to use pure PyArrow for parquet operations
+   - Changed Excel export to CSV export (simpler, no external dependencies)
+   - Simplified Dockerfile - no build tools needed
+
+3. **Azure OpenAI Authentication Update**:
+   - Converted from Service Principal-only to hybrid authentication
+   - Now uses BOTH Service Principal (for Azure AD token) AND API Key
+   - Token passed as Bearer authorization header
+   - Added comprehensive logging for debugging auth issues
+   - Test endpoint: GET /api/test-azure-openai
+
+4. **Bug Fixes**:
+   - Fixed 415 "Unsupported Media Type" in S3 Data middleware
+   - Fixed container log streaming issues (useCallback dependencies)
+   - Fixed URL_PREFIX in Dockerfiles for ALB routing
+   - Added error handlers and debug logging
+
+5. **Docker/Deployment Updates**:
+   - S3 Data backend Makefile updated with all dependencies
+   - Fixed pyarrow version to 20.0.0 (working version)
+   - Removed gcc/build tools requirement
+   - Added URL_PREFIX environment variables to Dockerfiles
+
+### Azure OpenAI Configuration
+- **Authentication**: Hybrid (Service Principal + API Key)
+- **Required Environment Variables**:
+  - `AZURE_OPENAI_ENDPOINT`: Your Azure OpenAI resource endpoint
+  - `AZURE_OPENAI_API_KEY`: OpenAI API key from Azure Portal
+  - `AZURE_OPENAI_DEPLOYMENT_NAME`: Model deployment name (e.g., "gpt-4o-2024-08-06")
+  - `AZURE_TENANT_ID`: Azure AD tenant ID
+  - `AZURE_SPN_CLIENT_ID`: Service Principal client/app ID
+  - `AZURE_USER_ID`: User identifier for headers (default: "emr-manager")
+  - PEM certificate path: `/app/azure_cert.pem`
+
+### ALB Routing Configuration
+| Service | Backend Path | Frontend Path | Backend Port | Frontend Port |
+|---------|--------------|---------------|--------------|---------------|
+| EMR | `/api/*` | `/emr/*` | 3700 | 8080 |
+| SSM | `/ssm-api/*` | `/parameters/*` | 3700 | 8080 |
+| S3 Data | `/s3data-api/*` | `/s3data/*` | 3700 | 8080 |
+
+### Known Issues and Solutions
+
+1. **S3 Data 415 Error**: Fixed by checking content-type before parsing JSON in middleware
+2. **Container Logs Not Loading**: Fixed useCallback dependencies in StepLogsModal
+3. **Docker Build Failures**: Remove pandas or use pre-built wheels
+4. **Azure OpenAI Auth Failures**: Check all env vars, PEM file permissions, and use test endpoint
 
 ### Next Steps
 1. Add DynamoDB service following established patterns
-2. Add S3 service with bucket/object management
-3. Consider adding cluster creation functionality
-4. Consider implementing cluster-level efficiency analysis (using CloudWatch metrics)
+2. Enhance S3 Data Viewer with:
+   - File upload capability
+   - Support for more file formats (JSON, CSV input)
+   - Folder creation/deletion
+3. Add cluster creation functionality to EMR
+4. Implement batch operations across services
 
 ### For Next Session
 To continue work, reference:
-- This CLAUDE.md file for project context
-- Recent commits for latest changes
-- Azure OpenAI configuration details below
-- Current deployment status on ECS
+- This CLAUDE.md file for complete project context
+- Check git log for detailed commit messages
+- All services use similar patterns - copy from S3 Data or SSM
+- Test endpoints locally with URL_PREFIX="" for debugging
 
 ## Project Overview
 
@@ -323,13 +371,14 @@ The project uses Docker for containerization:
 3. **Application ID Passing**: Frontend now passes applicationId to backend for container log requests
 4. **Gzipped Files**: Fixed to handle both stdout.gz and stderr.gz (both are compressed)
 
-### Completed Features (This Session)
+### Completed Features
 1. **Step Logs Viewer** ✅: 
    - Backend endpoints for fetching step and container logs from S3
    - Successfully extracts YARN application ID from stderr.gz
    - UI: "Logs" button in steps table (purple color)
    - Features: Tab switching between step/container logs, virtual scrolling, search, syntax highlighting, download
    - Auto-refresh option for running steps
+   - Fixed useCallback dependencies for proper log streaming
 
 2. **AI Step Analysis** ✅:
    - Azure OpenAI integration for intelligent log analysis
@@ -338,6 +387,16 @@ The project uses Docker for containerization:
    - Token refresh mechanism before API calls
    - Custom headers with Bearer token and user ID
    - Comprehensive error handling and logging
+   - Test endpoint: GET /api/test-azure-openai for connection verification
+
+3. **S3 Data Viewer** ✅ (NEW):
+   - Browse S3 buckets by environment (UAT1/2/3) and type (RAW/REFINED)
+   - Navigate folders with breadcrumb navigation
+   - Preview parquet files (up to 500 rows, 100MB limit)
+   - Download original parquet files
+   - Export to CSV format (up to 100,000 rows)
+   - Pagination for large directories
+   - All columns displayed (no limiting)
 
 ## Recent Additions (SSM Service)
 
@@ -468,26 +527,99 @@ dynamodb-frontend/
    - [ ] Check responsive design
 ```
 
-## Azure OpenAI Step Analysis Feature
+## Technical Implementation Details
 
-### Overview
-Implemented AI-powered step analysis that analyzes EMR step execution logs using Azure OpenAI to provide insights on failures, performance issues, and optimization opportunities.
+### S3 Data Viewer Service
 
-### Implementation Details
+#### Key Implementation Decisions
+1. **Removed Pandas**: Used pure PyArrow to avoid Docker build complexity
+2. **CSV Export**: Replaced Excel export with CSV for simplicity
+3. **Middleware Fix**: Fixed 415 error by checking content-type before parsing JSON
 
-#### Backend Configuration
-1. **Authentication**: Service Principal with PEM certificate
+#### Backend Implementation
+```python
+# Fixed middleware pattern (avoid 415 errors)
+@app.before_request
+def log_request_info():
+    if request.content_type and 'application/json' in request.content_type:
+        try:
+            body = request.get_json()
+            # Process JSON body
+        except Exception as e:
+            app.logger.debug(f'Failed to parse request body: {str(e)}')
+```
+
+#### PyArrow Usage for Parquet
+```python
+# Read parquet without pandas
+parquet_file = pq.ParquetFile(BytesIO(parquet_data))
+table = parquet_file.read()
+# Convert to list of dicts for JSON response
+data = []
+for i in range(len(table)):
+    record = {col: table[col][i].as_py() for col in columns}
+    data.append(record)
+```
+
+### Azure OpenAI Step Analysis Feature
+
+#### Hybrid Authentication Implementation
+1. **Authentication Flow**:
+   - Service Principal + PEM → Azure AD token
+   - Token used as Bearer auth header
+   - API Key also required by OpenAI client
+
 2. **Environment Variables** (in Dockerfile):
    ```dockerfile
-   ENV AZURE_OPENAI_ENDPOINT=""  # e.g., https://your-resource.openai.azure.com/
+   ENV AZURE_OPENAI_ENDPOINT=""
+   ENV AZURE_OPENAI_API_KEY=""  # NEW: Required for hybrid auth
    ENV AZURE_OPENAI_API_VERSION="2024-02-15-preview"
-   ENV AZURE_OPENAI_DEPLOYMENT_NAME=""  # Your deployment name
+   ENV AZURE_OPENAI_DEPLOYMENT_NAME=""
    ENV AZURE_TENANT_ID=""
    ENV AZURE_SPN_CLIENT_ID=""
+   ENV AZURE_USER_ID="emr-manager"
    ```
 
-3. **PEM Certificate**:
-   - Place `azure_cert.pem` in same directory as Dockerfile
+3. **Token Refresh Pattern**:
+   ```python
+   def refresh_azure_token():
+       token_response = credential.get_token("https://cognitiveservices.azure.com/.default")
+       azure_openai_client.default_headers["Authorization"] = f"Bearer {token_response.token}"
+   ```
+
+### Common Middleware Patterns
+
+All services use dual health endpoints:
+```python
+@app.route(f'{URL_PREFIX}/health', methods=['GET'])  # e.g., /api/health
+@app.route('/health', methods=['GET'])  # For ECS/ALB
+```
+
+### Docker Build Optimization
+
+1. **Simplified Dockerfile** (no pandas):
+   ```dockerfile
+   RUN chown -R jpmcnobody:jpmcnobody /app/ \
+       && pip install --no-cache-dir /app/dist/*.whl waitress toml
+   ```
+
+2. **URL_PREFIX Configuration**:
+   - Must be set in Dockerfile for production
+   - Use `URL_PREFIX=""` for local testing
+
+### Frontend Patterns
+
+1. **useCallback Dependencies** (fixed in StepLogsModal):
+   ```javascript
+   const loadLogs = useCallback(async (refresh = false) => {
+     // Implementation
+   }, [logType, logFile, selectedContainer, applicationId, cluster.clusterId, step.id]);
+   ```
+
+2. **API Base URLs**:
+   - EMR: `/api`
+   - SSM: `/ssm-api`
+   - S3 Data: `/s3data-api`
    - Copied to `/app/azure_cert.pem` with 600 permissions
    - Added to .gitignore for security
 
@@ -528,8 +660,59 @@ Key CloudWatch log messages:
 3. Build Docker image: `docker build -t emr-backend .`
 4. Deploy to ECS as usual
 
-### Future Enhancements Discussed
-1. **Cluster Efficiency Analysis**: Analyze overall cluster resource utilization
-2. **Advanced Step Analysis**: Deep dive into executor logs for data skew, bad joins, etc.
-3. **Caching**: Store analysis results to avoid re-analyzing completed steps
-4. **Batch Analysis**: Analyze multiple steps or compare similar jobs
+### Troubleshooting Guide
+
+#### Common Issues and Solutions
+
+1. **415 "Unsupported Media Type" Error**:
+   - Cause: Middleware trying to parse JSON for all requests
+   - Solution: Check content-type before accessing request.json
+   - Debug: Added 415 error handler in S3 Data service
+
+2. **Container Logs Not Streaming**:
+   - Cause: Stale closures in useCallback
+   - Solution: Add all dependencies to useCallback arrays
+   - Check: loadLogs, loadMoreLogs callback dependencies
+
+3. **Docker Build Failures** (pandas/gcc):
+   - Cause: Missing build tools in base image
+   - Solution: Remove pandas, use PyArrow only
+   - Alternative: Use pre-built wheels
+
+4. **Azure OpenAI Authentication Failures**:
+   - Test with: GET /api/test-azure-openai
+   - Check CloudWatch logs for detailed errors
+   - Verify all 6 environment variables are set
+   - Ensure PEM file has private key
+
+5. **ALB Routing Issues**:
+   - Backend URL_PREFIX must match ALB path
+   - Frontend homepage must match ALB path
+   - Test locally with URL_PREFIX=""
+
+#### Debug Commands
+
+```bash
+# Test health endpoints locally
+curl http://localhost:3700/health
+curl http://localhost:3700/api/health
+
+# Test with correct URL prefix
+URL_PREFIX="" python app.py
+
+# Check Azure OpenAI connection
+curl https://your-alb-url/api/test-azure-openai
+
+# View detailed logs
+docker logs <container-id> 2>&1 | grep -E "ERROR|WARN|Azure"
+```
+
+### Session Summary
+
+This session successfully:
+1. Implemented complete S3 Data Viewer service
+2. Fixed multiple deployment and runtime issues
+3. Converted Azure OpenAI to hybrid authentication
+4. Documented all patterns for future service development
+
+The project now has three fully functional services (EMR, SSM, S3 Data) with consistent patterns that can be replicated for additional AWS services.
