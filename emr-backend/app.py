@@ -160,6 +160,19 @@ else:
             app.logger.info(f"Tenant ID: {AZURE_TENANT_ID[:8]}...") # Log partial for security
             app.logger.info(f"Client ID: {AZURE_SPN_CLIENT_ID[:8]}...") # Log partial for security
             
+            # Test if PEM file is readable
+            try:
+                with open(AZURE_PEM_PATH, 'r') as f:
+                    pem_content = f.read()
+                    app.logger.info(f"PEM file found and readable, size: {len(pem_content)} bytes")
+                    # Check if it's a valid PEM format
+                    if "BEGIN CERTIFICATE" in pem_content or "BEGIN PRIVATE KEY" in pem_content:
+                        app.logger.info("PEM file appears to be in valid format")
+                    else:
+                        app.logger.warning("PEM file may not be in correct format")
+            except Exception as e:
+                app.logger.error(f"Failed to read PEM file: {str(e)}")
+            
             credential = CertificateCredential(
                 tenant_id=AZURE_TENANT_ID,
                 client_id=AZURE_SPN_CLIENT_ID,
@@ -178,10 +191,17 @@ else:
                     return token_cache['token']
                 
                 # Get new token
-                token = credential.get_token("https://cognitiveservices.azure.com/.default")
-                token_cache['token'] = token.token
-                token_cache['expires_on'] = token.expires_on
-                return token.token
+                try:
+                    app.logger.info("Requesting new token from Azure AD...")
+                    token = credential.get_token("https://cognitiveservices.azure.com/.default")
+                    token_cache['token'] = token.token
+                    token_cache['expires_on'] = token.expires_on
+                    app.logger.info("Successfully obtained token from Azure AD")
+                    return token.token
+                except Exception as e:
+                    app.logger.error(f"Failed to get token from Azure AD: {str(e)}")
+                    app.logger.error(f"Error type: {type(e).__name__}")
+                    raise
             
             azure_openai_client = AzureOpenAI(
                 azure_endpoint=AZURE_OPENAI_ENDPOINT,
@@ -887,6 +907,11 @@ def download_step_logs(cluster_id, step_id):
 @app.route(f'{URL_PREFIX}/clusters/<cluster_id>/steps/<step_id>/analyze', methods=['POST'])
 def analyze_step(cluster_id, step_id):
     """Analyze step execution using Azure OpenAI"""
+    app.logger.info(f"Analyze endpoint called for cluster {cluster_id}, step {step_id}")
+    app.logger.info(f"Request method: {request.method}")
+    app.logger.info(f"Request path: {request.path}")
+    app.logger.info(f"AZURE_OPENAI_ENABLED: {AZURE_OPENAI_ENABLED}")
+    
     if not AZURE_OPENAI_ENABLED:
         return jsonify({"error": "Step analysis feature is not available"}), 503
     
@@ -1089,6 +1114,21 @@ def health_check():
         'status': 'healthy',
         'service': 'emr-backend',
         'timestamp': datetime.now().isoformat()
+    })
+
+@app.route(f'{URL_PREFIX}/debug/routes', methods=['GET'])
+def debug_routes():
+    """Debug endpoint to list all registered routes"""
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append({
+            'endpoint': rule.endpoint,
+            'methods': list(rule.methods),
+            'path': str(rule)
+        })
+    return jsonify({
+        'url_prefix': URL_PREFIX,
+        'routes': sorted(routes, key=lambda x: x['path'])
     })
 
 @app.route('/health', methods=['GET'])

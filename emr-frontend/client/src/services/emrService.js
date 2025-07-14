@@ -211,7 +211,7 @@ class EMRService {
   }
 
   async analyzeStep(clusterId, stepId) {
-    const response = await fetch(`${API_BASE_URL}/clusters/${clusterId}/steps/${stepId}/analyze`, {
+    const response = await fetch(`${API_BASE_URL}/clusters/${encodeURIComponent(clusterId)}/steps/${encodeURIComponent(stepId)}/analyze`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
