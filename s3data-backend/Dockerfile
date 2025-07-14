@@ -25,9 +25,10 @@ WORKDIR /app
 RUN mkdir -p /app/logs
 
 # Install and run the app
+# Note: No build tools needed since we removed pandas dependency
+# PyArrow should install from pre-built wheels
 COPY dist /app/dist
 RUN chown -R jpmcnobody:jpmcnobody /app/ \
-    && pip install --upgrade pip wheel setuptools \
     && pip install --no-cache-dir /app/dist/*.whl waitress toml
 
 # Expose the port
