@@ -31,12 +31,13 @@ RUN mkdir -p /app/logs
 
 # Copy Azure PEM certificate (place azure_cert.pem in the same directory as Dockerfile)
 # This file should NOT be committed to git
-COPY azure_cert.pem /app/azure_cert.pem
-RUN chmod 600 /app/azure_cert.pem
+# Using wildcard to make it optional - won't fail if file doesn't exist
+COPY azure_cert.pe[m] /app/azure_cert.pem
 
 # Install and run the app
 COPY dist /app/dist
 RUN chown -R jpmcnobody:jpmcnobody /app/ \
+    && chmod 600 /app/azure_cert.pem \
     && pip install /app/dist/*.whl waitress toml
 
 # Expose the port

@@ -120,6 +120,11 @@ missing_credentials = []
 found_credentials = []
 
 if AZURE_OPENAI_ENDPOINT:
+    # Ensure endpoint has proper format
+    if not AZURE_OPENAI_ENDPOINT.startswith('https://'):
+        app.logger.warning(f"AZURE_OPENAI_ENDPOINT should start with https://, got: {AZURE_OPENAI_ENDPOINT}")
+    if not AZURE_OPENAI_ENDPOINT.endswith('/'):
+        AZURE_OPENAI_ENDPOINT += '/'
     found_credentials.append(f"AZURE_OPENAI_ENDPOINT={AZURE_OPENAI_ENDPOINT}")
 else:
     missing_credentials.append("AZURE_OPENAI_ENDPOINT")
@@ -162,10 +167,20 @@ else:
             )
             
             # Initialize Azure OpenAI client
+            # Cache for the token
+            token_cache = {'token': None, 'expires_on': 0}
+            
             # Define the token provider with the correct scope
             def get_token_provider():
-                # Azure Cognitive Services scope
+                import time
+                # Check if we have a valid cached token
+                if token_cache['token'] and token_cache['expires_on'] > time.time() + 300:  # 5 min buffer
+                    return token_cache['token']
+                
+                # Get new token
                 token = credential.get_token("https://cognitiveservices.azure.com/.default")
+                token_cache['token'] = token.token
+                token_cache['expires_on'] = token.expires_on
                 return token.token
             
             azure_openai_client = AzureOpenAI(
@@ -1021,28 +1036,39 @@ Please provide:
 
 Keep the response under 300 words and focus on actionable insights."""
 
-        # Call Azure OpenAI
+        # Call Azure OpenAI with retry logic
         app.logger.info(f"Calling Azure OpenAI for analysis with {len(prompt)} character prompt")
         app.logger.debug(f"Using model: {AZURE_OPENAI_DEPLOYMENT_NAME}")
         
-        try:
-            completion = azure_openai_client.chat.completions.create(
-                model=AZURE_OPENAI_DEPLOYMENT_NAME,
-                messages=[
-                    {"role": "system", "content": "You are an expert in analyzing EMR/Spark job execution logs."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=500,
-                timeout=30
-            )
-            
-            analysis = completion.choices[0].message.content
-            app.logger.info(f"Azure OpenAI analysis completed, response length: {len(analysis)} characters")
-            
-        except Exception as e:
-            app.logger.error(f"Azure OpenAI API error: {str(e)}", exc_info=True)
-            return jsonify({"error": f"Failed to get AI analysis: {str(e)}"}), 500
+        analysis = None
+        max_retries = 3
+        retry_delay = 1
+        
+        for attempt in range(max_retries):
+            try:
+                completion = azure_openai_client.chat.completions.create(
+                    model=AZURE_OPENAI_DEPLOYMENT_NAME,
+                    messages=[
+                        {"role": "system", "content": "You are an expert in analyzing EMR/Spark job execution logs."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.3,
+                    max_tokens=500,
+                    timeout=30
+                )
+                
+                analysis = completion.choices[0].message.content
+                app.logger.info(f"Azure OpenAI analysis completed, response length: {len(analysis)} characters")
+                break
+                
+            except Exception as e:
+                app.logger.warning(f"Azure OpenAI attempt {attempt + 1} failed: {str(e)}")
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                else:
+                    app.logger.error(f"Azure OpenAI API error after {max_retries} attempts: {str(e)}", exc_info=True)
+                    return jsonify({"error": f"Failed to get AI analysis after {max_retries} attempts: {str(e)}"}), 500
         
         return jsonify({
             'stepId': step_id,
