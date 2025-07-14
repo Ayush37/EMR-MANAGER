@@ -11,6 +11,7 @@ from botocore.exceptions import ClientError, BotoCoreError
 import gzip
 import re
 from io import BytesIO
+from azure.identity import CertificateCredential
 from openai import AzureOpenAI
 
 # Initialize Flask app
@@ -101,69 +102,112 @@ LAMBDA_FUNCTION_NAMES = {
 # S3 log bucket for all UAT environments
 S3_LOG_BUCKET = 'app-id-107923-dep-id-107924-uu-id-mpm6sfacq4a8'
 
-# Azure OpenAI Configuration - API Key Authentication
+# Azure OpenAI Configuration - Hybrid Authentication (Service Principal + API Key)
 AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT', '')
-AZURE_OPENAI_API_KEY = os.getenv('AZURE_OPENAI_API_KEY', '')
+AZURE_OPENAI_API_KEY = os.getenv('AZURE_OPENAI_API_KEY', '')  # OpenAI API Key
 AZURE_OPENAI_API_VERSION = os.getenv('AZURE_OPENAI_API_VERSION', '2024-02-15-preview')
 AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', '')
+
+# Service Principal Configuration for Azure AD Token
+AZURE_TENANT_ID = os.getenv('AZURE_TENANT_ID', '')
+AZURE_SPN_CLIENT_ID = os.getenv('AZURE_SPN_CLIENT_ID', '')
+AZURE_PEM_PATH = os.getenv('AZURE_PEM_PATH', '/app/azure_cert.pem')
+AZURE_USER_ID = os.getenv('AZURE_USER_ID', 'emr-manager')  # User ID for headers
 
 # Initialize Azure OpenAI client if credentials are available
 azure_openai_client = None
 AZURE_OPENAI_ENABLED = False
 
-# Check which credentials are available
-app.logger.info("Checking Azure OpenAI credentials...")
-missing_credentials = []
-found_credentials = []
+# Check credentials and initialize Azure AD token provider
+app.logger.info("Checking Azure OpenAI hybrid authentication credentials...")
 
-if AZURE_OPENAI_ENDPOINT:
-    # Ensure endpoint has proper format
-    if not AZURE_OPENAI_ENDPOINT.startswith('https://'):
-        app.logger.warning(f"AZURE_OPENAI_ENDPOINT should start with https://, got: {AZURE_OPENAI_ENDPOINT}")
-    if not AZURE_OPENAI_ENDPOINT.endswith('/'):
-        AZURE_OPENAI_ENDPOINT += '/'
-    found_credentials.append(f"AZURE_OPENAI_ENDPOINT={AZURE_OPENAI_ENDPOINT}")
-else:
-    missing_credentials.append("AZURE_OPENAI_ENDPOINT")
-    
-if AZURE_OPENAI_API_KEY:
-    found_credentials.append(f"AZURE_OPENAI_API_KEY=***{AZURE_OPENAI_API_KEY[-4:]}")  # Show last 4 chars only
-else:
-    missing_credentials.append("AZURE_OPENAI_API_KEY")
-    
-if AZURE_OPENAI_DEPLOYMENT_NAME:
-    found_credentials.append(f"AZURE_OPENAI_DEPLOYMENT_NAME={AZURE_OPENAI_DEPLOYMENT_NAME}")
-else:
-    missing_credentials.append("AZURE_OPENAI_DEPLOYMENT_NAME")
+# Check OpenAI credentials
+openai_missing = []
+if not AZURE_OPENAI_ENDPOINT:
+    openai_missing.append("AZURE_OPENAI_ENDPOINT")
+if not AZURE_OPENAI_API_KEY:
+    openai_missing.append("AZURE_OPENAI_API_KEY")
+if not AZURE_OPENAI_DEPLOYMENT_NAME:
+    openai_missing.append("AZURE_OPENAI_DEPLOYMENT_NAME")
 
-if found_credentials:
-    app.logger.info(f"Found credentials: {', '.join(found_credentials)}")
+# Check Service Principal credentials
+sp_missing = []
+if not AZURE_TENANT_ID:
+    sp_missing.append("AZURE_TENANT_ID")
+if not AZURE_SPN_CLIENT_ID:
+    sp_missing.append("AZURE_SPN_CLIENT_ID")
+if not os.path.exists(AZURE_PEM_PATH):
+    sp_missing.append(f"PEM certificate at {AZURE_PEM_PATH}")
 
-if missing_credentials:
-    app.logger.warning(f"Azure OpenAI credentials incomplete. Missing: {', '.join(missing_credentials)}")
+if openai_missing or sp_missing:
+    if openai_missing:
+        app.logger.warning(f"OpenAI credentials missing: {', '.join(openai_missing)}")
+    if sp_missing:
+        app.logger.warning(f"Service Principal credentials missing: {', '.join(sp_missing)}")
     app.logger.warning("Step analysis feature disabled due to missing credentials")
     AZURE_OPENAI_ENABLED = False
 else:
     try:
-        # Initialize Azure OpenAI client with API key
+        # Initialize Service Principal credential for Azure AD token
+        app.logger.info("Initializing Service Principal authentication...")
+        credential = CertificateCredential(
+            tenant_id=AZURE_TENANT_ID,
+            client_id=AZURE_SPN_CLIENT_ID,
+            certificate_path=AZURE_PEM_PATH
+        )
+        
+        # Test the credential and get initial token
+        app.logger.info("Testing Service Principal credential...")
+        token_response = credential.get_token("https://cognitiveservices.azure.com/.default")
+        access_token = token_response.token
+        app.logger.info("Successfully obtained Azure AD access token")
+        
+        # Initialize Azure OpenAI client with API key and custom headers
         app.logger.info(f"Initializing Azure OpenAI with endpoint: {AZURE_OPENAI_ENDPOINT}")
         app.logger.info(f"Using deployment: {AZURE_OPENAI_DEPLOYMENT_NAME}")
         app.logger.info(f"API version: {AZURE_OPENAI_API_VERSION}")
         
-        # Initialize Azure OpenAI client with API key
+        # Create headers with Bearer token and user ID
+        default_headers = {
+            "Authorization": f"Bearer {access_token}",
+            "x-ms-useragent": AZURE_USER_ID
+        }
+        
         azure_openai_client = AzureOpenAI(
             azure_endpoint=AZURE_OPENAI_ENDPOINT,
             api_key=AZURE_OPENAI_API_KEY,
-            api_version=AZURE_OPENAI_API_VERSION
+            api_version=AZURE_OPENAI_API_VERSION,
+            default_headers=default_headers
         )
         
+        # Store credential for token refresh
+        azure_openai_client._credential = credential
+        
         AZURE_OPENAI_ENABLED = True
-        app.logger.info("Azure OpenAI integration enabled successfully with API key authentication")
+        app.logger.info("Azure OpenAI integration enabled with hybrid authentication (Service Principal + API Key)")
         
     except Exception as e:
         app.logger.error(f"Failed to initialize Azure OpenAI client: {str(e)}")
         app.logger.error(f"Error type: {type(e).__name__}")
         AZURE_OPENAI_ENABLED = False
+
+def refresh_azure_token():
+    """Refresh Azure AD token and update OpenAI client headers"""
+    if not AZURE_OPENAI_ENABLED or not hasattr(azure_openai_client, '_credential'):
+        return
+    
+    try:
+        app.logger.debug("Refreshing Azure AD token...")
+        token_response = azure_openai_client._credential.get_token("https://cognitiveservices.azure.com/.default")
+        access_token = token_response.token
+        
+        # Update the default headers with new token
+        azure_openai_client.default_headers["Authorization"] = f"Bearer {access_token}"
+        app.logger.debug("Azure AD token refreshed successfully")
+        
+    except Exception as e:
+        app.logger.error(f"Failed to refresh Azure AD token: {str(e)}")
+        raise
 
 # Request logging middleware
 @app.before_request
@@ -1018,6 +1062,9 @@ Keep the response under 300 words and focus on actionable insights."""
         
         for attempt in range(max_retries):
             try:
+                # Refresh Azure AD token before making API call
+                refresh_azure_token()
+                
                 completion = azure_openai_client.chat.completions.create(
                     model=AZURE_OPENAI_DEPLOYMENT_NAME,
                     messages=[

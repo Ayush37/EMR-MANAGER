@@ -17,11 +17,16 @@ ENV APP_NAME="emr-cluster-manager"
 ENV PORT="3700"
 ENV URL_PREFIX=""
 
-# Azure OpenAI Configuration - API Key Authentication
+# Azure OpenAI Configuration - Hybrid Authentication (Service Principal + API Key)
 ENV AZURE_OPENAI_ENDPOINT=""
 ENV AZURE_OPENAI_API_VERSION="2024-02-15-preview"
 ENV AZURE_OPENAI_DEPLOYMENT_NAME=""
 ENV AZURE_OPENAI_API_KEY=""
+
+# Service Principal Configuration for Azure AD Token
+ENV AZURE_TENANT_ID=""
+ENV AZURE_SPN_CLIENT_ID=""
+ENV AZURE_USER_ID="emr-manager"
 
 # Set the working directory
 WORKDIR /app
@@ -29,9 +34,15 @@ WORKDIR /app
 # Create logs directory
 RUN mkdir -p /app/logs
 
+# Copy Azure PEM certificate (place azure_cert.pem in the same directory as Dockerfile)
+# This file should NOT be committed to git
+# Using wildcard to make it optional - won't fail if file doesn't exist
+COPY azure_cert.pe[m] /app/azure_cert.pem
+
 # Install and run the app
 COPY dist /app/dist
 RUN chown -R jpmcnobody:jpmcnobody /app/ \
+    && chmod 600 /app/azure_cert.pem || true \
     && pip install /app/dist/*.whl waitress toml
 
 # Expose the port
