@@ -920,11 +920,15 @@ def download_step_logs(cluster_id, step_id):
                 container_match = re.match(r'container_[^_]+_(\d+)_(\d+)_\d+_\d+', container_id)
                 if container_match:
                     application_id = f"application_{container_match.group(1)}_{container_match.group(2)}"
+                    app.logger.info(f"Derived application ID from container ID: {application_id}")
                 else:
+                    app.logger.error(f"Could not parse application ID from container ID: {container_id}")
                     return jsonify({"error": "Could not determine application ID"}), 400
+            
             # Both stdout and stderr are gzipped
             s3_key = f"logs/{cluster_id}/containers/{application_id}/{container_id}/{log_file}.gz"
             filename = f"{container_id}_{log_file}.log"
+            app.logger.info(f"Downloading container log: s3://{S3_LOG_BUCKET}/{s3_key}")
             
             # Download
             response = s3.get_object(Bucket=S3_LOG_BUCKET, Key=s3_key)

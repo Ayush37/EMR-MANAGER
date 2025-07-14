@@ -55,7 +55,7 @@ const StepLogsModal = ({ cluster, step, onClose }) => {
     }
   };
 
-  const loadLogs = async (refresh = false) => {
+  const loadLogs = useCallback(async (refresh = false) => {
     try {
       const startLine = refresh ? 0 : loadedLines.current;
       const params = {
@@ -93,7 +93,7 @@ const StepLogsModal = ({ cluster, step, onClose }) => {
         toast.error('Failed to load logs');
       }
     }
-  };
+  }, [logType, logFile, selectedContainer, applicationId, cluster.clusterId, step.id]);
 
   const loadMoreLogs = useCallback(async () => {
     if (loadingMore || !hasMore) return;
@@ -104,7 +104,7 @@ const StepLogsModal = ({ cluster, step, onClose }) => {
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, hasMore]);
+  }, [loadingMore, hasMore, logType, logFile, selectedContainer, applicationId]);
 
   // Virtual scrolling
   const handleScroll = useCallback(() => {
@@ -124,6 +124,7 @@ const StepLogsModal = ({ cluster, step, onClose }) => {
     setLogs([]);
     loadedLines.current = 0;
     setHasMore(true);
+    // Note: applicationId might be set after first load from step logs
     loadLogs();
   };
 
