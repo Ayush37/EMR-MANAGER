@@ -87,9 +87,7 @@ setup-py: ## Create setup.py file required for building wheel
 	@echo "        \"python-dotenv==1.0.0\"," >> setup.py
 	@echo "        \"waitress==2.1.2\"," >> setup.py
 	@echo "        \"Werkzeug==2.3.7\"," >> setup.py
-	@echo "        \"pandas==2.0.3\"," >> setup.py
 	@echo "        \"pyarrow==20.0.0\"," >> setup.py
-	@echo "        \"openpyxl==3.1.2\"," >> setup.py
 	@echo "    ]," >> setup.py
 	@echo "    python_requires=\">=3.9\"," >> setup.py
 	@echo ")" >> setup.py

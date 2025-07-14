@@ -8,10 +8,12 @@ from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
-import pandas as pd
 import pyarrow.parquet as pq
+import pyarrow as pa
+import pyarrow.compute as pc
 from io import BytesIO
 import re
+import csv
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -216,26 +218,37 @@ def preview_parquet():
             response = s3.get_object(Bucket=bucket_name, Key=file_path)
             parquet_data = response['Body'].read()
             
-            # Read parquet file
-            df = pd.read_parquet(BytesIO(parquet_data))
+            # Read parquet file using pyarrow
+            parquet_file = pq.ParquetFile(BytesIO(parquet_data))
             
             # Get metadata
-            total_rows = len(df)
-            total_columns = len(df.columns)
-            columns = df.columns.tolist()
+            total_rows = parquet_file.metadata.num_rows
+            schema = parquet_file.schema_arrow
+            columns = [field.name for field in schema]
+            total_columns = len(columns)
             
-            # Limit preview to first 500 rows
+            # Read first batch (up to 500 rows)
             preview_rows = min(500, total_rows)
-            df_preview = df.head(preview_rows)
             
-            # Convert to records format
-            data = df_preview.to_dict('records')
+            # Read the table
+            table = parquet_file.read()
             
-            # Clean up any NaN/inf values for JSON serialization
-            for record in data:
-                for key, value in record.items():
-                    if pd.isna(value) or (isinstance(value, float) and not pd.isfinite(value)):
-                        record[key] = None
+            # Slice to get preview rows
+            if total_rows > preview_rows:
+                table = table.slice(0, preview_rows)
+            
+            # Convert to list of dictionaries
+            data = []
+            for i in range(len(table)):
+                record = {}
+                for col_name in columns:
+                    value = table[col_name][i].as_py()
+                    # Handle None values and special float values
+                    if value is None or (isinstance(value, float) and (value != value or value == float('inf') or value == float('-inf'))):
+                        record[col_name] = None
+                    else:
+                        record[col_name] = value
+                data.append(record)
             
             return jsonify({
                 'data': data,
@@ -294,30 +307,33 @@ def download_file():
                     'Content-Type': 'application/octet-stream'
                 }
             )
-        elif format_type == 'excel':
-            # Convert to Excel
-            df = pd.read_parquet(BytesIO(parquet_data))
+        elif format_type == 'excel' or format_type == 'csv':
+            # Convert to CSV (simpler than Excel without pandas)
+            parquet_file = pq.ParquetFile(BytesIO(parquet_data))
+            table = parquet_file.read()
             
-            # Limit Excel export to 10,000 rows
-            MAX_EXCEL_ROWS = 10000
-            if len(df) > MAX_EXCEL_ROWS:
-                df = df.head(MAX_EXCEL_ROWS)
-                app.logger.info(f"Excel export limited to {MAX_EXCEL_ROWS} rows")
+            # Limit CSV export to 100,000 rows
+            MAX_CSV_ROWS = 100000
+            if table.num_rows > MAX_CSV_ROWS:
+                table = table.slice(0, MAX_CSV_ROWS)
+                app.logger.info(f"CSV export limited to {MAX_CSV_ROWS} rows")
             
-            # Create Excel file in memory
-            excel_buffer = BytesIO()
-            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name='Data')
+            # Create CSV file in memory
+            csv_buffer = BytesIO()
             
-            excel_data = excel_buffer.getvalue()
-            filename = file_path.split('/')[-1].replace('.parquet', '.xlsx')
+            # Write CSV using pyarrow's CSV writer
+            csv_options = pa.csv.WriteOptions(include_header=True)
+            pa.csv.write_csv(table, csv_buffer, write_options=csv_options)
+            
+            csv_data = csv_buffer.getvalue()
+            filename = file_path.split('/')[-1].replace('.parquet', '.csv')
             
             return Response(
-                excel_data,
-                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                csv_data,
+                mimetype='text/csv',
                 headers={
                     'Content-Disposition': f'attachment; filename="{filename}"',
-                    'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    'Content-Type': 'text/csv'
                 }
             )
         else:

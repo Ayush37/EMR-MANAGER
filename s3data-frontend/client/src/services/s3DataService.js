@@ -76,7 +76,7 @@ class S3DataService {
       // Get filename from Content-Disposition header
       const contentDisposition = response.headers.get('Content-Disposition');
       const filenameMatch = /filename="(.+)"/.exec(contentDisposition);
-      const filename = filenameMatch ? filenameMatch[1] : `download.${format === 'excel' ? 'xlsx' : 'parquet'}`;
+      const filename = filenameMatch ? filenameMatch[1] : `download.${format === 'csv' ? 'csv' : 'parquet'}`;
       
       // Create blob and download
       const blob = await response.blob();
