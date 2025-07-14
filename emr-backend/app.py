@@ -11,7 +11,6 @@ from botocore.exceptions import ClientError, BotoCoreError
 import gzip
 import re
 from io import BytesIO
-from azure.identity import CertificateCredential
 from openai import AzureOpenAI
 
 # Initialize Flask app
@@ -102,13 +101,11 @@ LAMBDA_FUNCTION_NAMES = {
 # S3 log bucket for all UAT environments
 S3_LOG_BUCKET = 'app-id-107923-dep-id-107924-uu-id-mpm6sfacq4a8'
 
-# Azure OpenAI Configuration - Service Principal Authentication
+# Azure OpenAI Configuration - API Key Authentication
 AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT', '')
+AZURE_OPENAI_API_KEY = os.getenv('AZURE_OPENAI_API_KEY', '')
 AZURE_OPENAI_API_VERSION = os.getenv('AZURE_OPENAI_API_VERSION', '2024-02-15-preview')
 AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', '')
-AZURE_TENANT_ID = os.getenv('AZURE_TENANT_ID', '')
-AZURE_SPN_CLIENT_ID = os.getenv('AZURE_SPN_CLIENT_ID', '')
-AZURE_PEM_PATH = '/app/azure_cert.pem'
 
 # Initialize Azure OpenAI client if credentials are available
 azure_openai_client = None
@@ -129,15 +126,10 @@ if AZURE_OPENAI_ENDPOINT:
 else:
     missing_credentials.append("AZURE_OPENAI_ENDPOINT")
     
-if AZURE_TENANT_ID:
-    found_credentials.append(f"AZURE_TENANT_ID={AZURE_TENANT_ID[:8]}...")
+if AZURE_OPENAI_API_KEY:
+    found_credentials.append(f"AZURE_OPENAI_API_KEY=***{AZURE_OPENAI_API_KEY[-4:]}")  # Show last 4 chars only
 else:
-    missing_credentials.append("AZURE_TENANT_ID")
-    
-if AZURE_SPN_CLIENT_ID:
-    found_credentials.append(f"AZURE_SPN_CLIENT_ID={AZURE_SPN_CLIENT_ID[:8]}...")
-else:
-    missing_credentials.append("AZURE_SPN_CLIENT_ID")
+    missing_credentials.append("AZURE_OPENAI_API_KEY")
     
 if AZURE_OPENAI_DEPLOYMENT_NAME:
     found_credentials.append(f"AZURE_OPENAI_DEPLOYMENT_NAME={AZURE_OPENAI_DEPLOYMENT_NAME}")
@@ -150,88 +142,28 @@ if found_credentials:
 if missing_credentials:
     app.logger.warning(f"Azure OpenAI credentials incomplete. Missing: {', '.join(missing_credentials)}")
     app.logger.warning("Step analysis feature disabled due to missing credentials")
+    AZURE_OPENAI_ENABLED = False
 else:
-    if os.path.exists(AZURE_PEM_PATH):
-        try:
-            # Create credential using Service Principal with certificate
-            app.logger.info(f"Initializing Azure OpenAI with endpoint: {AZURE_OPENAI_ENDPOINT}")
-            app.logger.info(f"Using deployment: {AZURE_OPENAI_DEPLOYMENT_NAME}")
-            app.logger.info(f"API version: {AZURE_OPENAI_API_VERSION}")
-            app.logger.info(f"Tenant ID: {AZURE_TENANT_ID[:8]}...") # Log partial for security
-            app.logger.info(f"Client ID: {AZURE_SPN_CLIENT_ID[:8]}...") # Log partial for security
-            
-            # Test if PEM file is readable
-            try:
-                with open(AZURE_PEM_PATH, 'r') as f:
-                    pem_content = f.read()
-                    app.logger.info(f"PEM file found and readable, size: {len(pem_content)} bytes")
-                    # Check if it's a valid PEM format
-                    if "BEGIN CERTIFICATE" in pem_content or "BEGIN PRIVATE KEY" in pem_content:
-                        app.logger.info("PEM file appears to be in valid format")
-                    else:
-                        app.logger.warning("PEM file may not be in correct format")
-            except Exception as e:
-                app.logger.error(f"Failed to read PEM file: {str(e)}")
-            
-            # Try to create credential and test it immediately
-            try:
-                credential = CertificateCredential(
-                    tenant_id=AZURE_TENANT_ID,
-                    client_id=AZURE_SPN_CLIENT_ID,
-                    certificate_path=AZURE_PEM_PATH
-                )
-                app.logger.info("CertificateCredential created successfully")
-                
-                # Test the credential immediately
-                test_token = credential.get_token("https://cognitiveservices.azure.com/.default")
-                app.logger.info("Test token acquired successfully")
-            except Exception as e:
-                app.logger.error(f"Failed to create/test credential: {str(e)}")
-                app.logger.error(f"This usually means:")
-                app.logger.error("1. The PEM file doesn't contain the private key")
-                app.logger.error("2. The certificate is not registered with the Service Principal")
-                app.logger.error("3. The Service Principal doesn't have the required permissions")
-                app.logger.error("4. The tenant ID or client ID is incorrect")
-                raise
-            
-            # Initialize Azure OpenAI client
-            # Cache for the token
-            token_cache = {'token': None, 'expires_on': 0}
-            
-            # Define the token provider with the correct scope
-            def get_token_provider():
-                import time
-                # Check if we have a valid cached token
-                if token_cache['token'] and token_cache['expires_on'] > time.time() + 300:  # 5 min buffer
-                    return token_cache['token']
-                
-                # Get new token
-                try:
-                    app.logger.info("Requesting new token from Azure AD...")
-                    token = credential.get_token("https://cognitiveservices.azure.com/.default")
-                    token_cache['token'] = token.token
-                    token_cache['expires_on'] = token.expires_on
-                    app.logger.info("Successfully obtained token from Azure AD")
-                    return token.token
-                except Exception as e:
-                    app.logger.error(f"Failed to get token from Azure AD: {str(e)}")
-                    app.logger.error(f"Error type: {type(e).__name__}")
-                    raise
-            
-            azure_openai_client = AzureOpenAI(
-                azure_endpoint=AZURE_OPENAI_ENDPOINT,
-                api_version=AZURE_OPENAI_API_VERSION,
-                azure_ad_token_provider=get_token_provider
-            )
-            
-            AZURE_OPENAI_ENABLED = True
-            app.logger.info("Azure OpenAI integration enabled successfully with Service Principal authentication")
-        except Exception as e:
-            app.logger.error(f"Failed to initialize Azure OpenAI client: {str(e)}")
-            app.logger.error(f"Error type: {type(e).__name__}")
-    else:
-        app.logger.warning(f"Azure PEM certificate not found at {AZURE_PEM_PATH}")
-        app.logger.warning("Step analysis feature disabled due to missing PEM certificate")
+    try:
+        # Initialize Azure OpenAI client with API key
+        app.logger.info(f"Initializing Azure OpenAI with endpoint: {AZURE_OPENAI_ENDPOINT}")
+        app.logger.info(f"Using deployment: {AZURE_OPENAI_DEPLOYMENT_NAME}")
+        app.logger.info(f"API version: {AZURE_OPENAI_API_VERSION}")
+        
+        # Initialize Azure OpenAI client with API key
+        azure_openai_client = AzureOpenAI(
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+            api_key=AZURE_OPENAI_API_KEY,
+            api_version=AZURE_OPENAI_API_VERSION
+        )
+        
+        AZURE_OPENAI_ENABLED = True
+        app.logger.info("Azure OpenAI integration enabled successfully with API key authentication")
+        
+    except Exception as e:
+        app.logger.error(f"Failed to initialize Azure OpenAI client: {str(e)}")
+        app.logger.error(f"Error type: {type(e).__name__}")
+        AZURE_OPENAI_ENABLED = False
 
 # Request logging middleware
 @app.before_request

@@ -85,7 +85,6 @@ setup-py: ## Create setup.py file required for building wheel
 	@echo "        \"boto3\"," >> setup.py
 	@echo "        \"waitress\"," >> setup.py
 	@echo "        \"openai\"," >> setup.py
-	@echo "        \"azure-identity\"," >> setup.py
 	@echo "    ]," >> setup.py
 	@echo "    python_requires=\">=3.9\"," >> setup.py
 	@echo ")" >> setup.py

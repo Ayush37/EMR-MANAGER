@@ -334,7 +334,7 @@ The project uses Docker for containerization:
 2. **AI Step Analysis** ✅:
    - Azure OpenAI integration for intelligent log analysis
    - Provides insights on failures, performance, and optimizations
-   - Service Principal authentication with PEM certificate
+   - API Key authentication (converted from Service Principal in latest session)
    - Comprehensive error handling and logging
 
 ## Recent Additions (SSM Service)
