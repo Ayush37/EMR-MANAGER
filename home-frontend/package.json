@@ -1,0 +1,13 @@
+{
+  "name": "aws-services-home-frontend",
+  "version": "1.0.0",
+  "description": "AWS Services Portal - Home Frontend",
+  "scripts": {
+    "install:all": "cd client && npm install && cd ../server && npm install",
+    "build": "cd client && npm run build",
+    "start:dev": "cd client && npm start",
+    "start:server": "cd server && npm start",
+    "docker:build": "docker build -t aws-services-home .",
+    "docker:run": "docker run -p 8080:8080 aws-services-home"
+  }
+}

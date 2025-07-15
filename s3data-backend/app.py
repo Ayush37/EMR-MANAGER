@@ -379,11 +379,27 @@ def health_check():
 @app.route('/health', methods=['GET'])
 def health_check_root():
     """Health check endpoint at root for ECS/ALB health checks"""
+    app.logger.info(f"Health check called - Method: {request.method}, Path: {request.path}")
+    app.logger.info(f"Headers: {dict(request.headers)}")
     return jsonify({
         'status': 'healthy',
         'service': 's3data-backend',
         'timestamp': datetime.now().isoformat()
     })
+
+@app.errorhandler(415)
+def handle_415_error(e):
+    app.logger.error(f"415 Error - Method: {request.method}, Path: {request.path}")
+    app.logger.error(f"Content-Type: {request.content_type}")
+    app.logger.error(f"Headers: {dict(request.headers)}")
+    app.logger.error(f"Error: {str(e)}")
+    return jsonify({
+        'error': 'Unsupported Media Type',
+        'message': str(e),
+        'path': request.path,
+        'method': request.method,
+        'content_type': request.content_type
+    }), 415
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 3700))

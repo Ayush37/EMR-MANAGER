@@ -716,3 +716,80 @@ This session successfully:
 4. Documented all patterns for future service development
 
 The project now has three fully functional services (EMR, SSM, S3 Data) with consistent patterns that can be replicated for additional AWS services.
+
+## Planned: Unified Navigation Portal (Option 5 - Side Navigation)
+
+### Overview
+Transform the home frontend into a shell application with persistent side navigation that loads services in an embedded content area, keeping users within a single interface.
+
+### Architecture Design
+```
++------------------------+--------------------------------+
+|  AWS Services Portal   |                                |
+|                        |                                |
+| ▼ EMR Clusters        |     Service Content Area       |
+| ▷ SSM Parameters      |        (iframe)                |
+| ▷ S3 Data Viewer      |                                |
+|                        |   Loads: /emr, /parameters,    |
+| ─────────────         |          /s3data               |
+|                        |                                |
+| Notifications (2)      |                                |
+| User: john.doe        |                                |
++------------------------+--------------------------------+
+```
+
+### Implementation Plan
+
+#### Phase 1: Home Frontend Transformation
+- Convert to shell/wrapper application
+- Add persistent side navigation component
+- Implement iframe-based content area
+- Add service state management
+
+#### Phase 2: Service Integration
+- Configure iframe routing:
+  - `/services/emr` → loads `/emr` in iframe
+  - `/services/ssm` → loads `/parameters` in iframe
+  - `/services/s3data` → loads `/s3data` in iframe
+- Implement loading states
+- Add error boundaries
+
+#### Phase 3: Inter-frame Communication
+- PostMessage API for:
+  - Title/breadcrumb updates
+  - Loading state notifications
+  - Error messages
+  - Deep linking between services
+
+#### Phase 4: Service Frontend Adjustments
+- Remove redundant headers from services
+- Adjust padding/margins for embedded view
+- Add "Open in New Tab" option
+- Ensure modals work within iframe bounds
+
+#### Phase 5: Enhanced Features
+- Service health indicators
+- Global notifications area
+- Quick actions/favorites
+- Cross-service search
+
+### Technical Considerations
+
+**Pros:**
+- Unified experience with persistent navigation
+- Services remain independently deployable
+- Minimal changes to existing services
+- Can break out to full page when needed
+
+**Challenges:**
+- Iframe limitations (downloads, popups)
+- Browser history management
+- Performance (multiple React instances)
+- Scrolling behavior needs attention
+
+### Required Changes Summary
+
+1. **Home Frontend**: Major refactor to shell app
+2. **Service Frontends**: Minor layout adjustments
+3. **Backend Services**: No changes needed
+4. **ALB Configuration**: No changes needed
