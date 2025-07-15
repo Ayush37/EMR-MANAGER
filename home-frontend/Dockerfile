@@ -1,38 +1,37 @@
-# Build stage for React app
-FROM dockerhub.jpmchase.net/node:20 as build
+# Using Node Managed Base Image for React UI
+FROM jetae-publish.prod.aws.jpmchase.net/container-base/managedbaseimages/nodejs:18.12.1-stable AS client-build
 
-WORKDIR /app/client
+WORKDIR /usr/src/app
 
-# Copy package files
-COPY client/package*.json ./
-RUN npm ci
+COPY ./client/ ./client/
 
-# Copy source code
-COPY client/ ./
+# Access Permissions
+RUN chown -R jpmcnobody:jpmcnobody /usr/src/app
+RUN chmod 775 /usr/src/app
+USER jpmcnobody
 
-# Build the React app
-RUN npm run build
+# Build the react app to generate the build folder
+RUN cd client && npm install && npm run build
 
-# Production stage
-FROM dockerhub.jpmchase.net/node:20-alpine
+# Using Node Managed Base Image for node server to serve the build folder from UI
+FROM jetae-publish.prod.aws.jpmchase.net/container-base/managedbaseimages/nodejs:18.12.1-stable AS server-build
 
+# Create app directory
 WORKDIR /app
 
-# Copy server package files
-COPY server/package*.json ./server/
-RUN cd server && npm ci --only=production
+# Copy the UI build to the current context
+COPY --from=client-build /usr/src/app/client/build ./client/build
 
-# Copy server code
-COPY server/ ./server/
+# Copy the package to install the dependencies
+COPY ./server/package.json ./server/
 
-# Copy built React app from build stage
-COPY --from=build /app/client/build ./client/build
+# Install server side dependencies/packages
+RUN cd server && npm install
 
-# Set working directory to server
-WORKDIR /app/server
+# Copy the server file
+COPY ./server/index.js ./server/
 
-# Expose port
 EXPOSE 8080
 
-# Start the Express server
-CMD ["npm", "start"]
+# Run the server
+CMD ["node", "./server/index.js"]
