@@ -296,14 +296,31 @@ def refresh_azure_token():
     
     try:
         app.logger.info("Refreshing Azure AD token...")
-        token_response = azure_openai_client._credential.get_token("https://cognitiveservices.azure.com/.default")
+        
+        # Force get a new token (don't rely on cached tokens)
+        token_response = azure_openai_client._credential.get_token(
+            "https://cognitiveservices.azure.com/.default",
+            enable_cae=True  # Force fresh token
+        )
         access_token = token_response.token
         
-        # Update the default headers with new token
+        # Clear and update the headers
+        if "Authorization" in azure_openai_client.default_headers:
+            del azure_openai_client.default_headers["Authorization"]
+        
         azure_openai_client.default_headers["Authorization"] = f"Bearer {access_token}"
+        
+        # Also update any cached headers in the client's session
+        if hasattr(azure_openai_client, '_client') and hasattr(azure_openai_client._client, 'headers'):
+            azure_openai_client._client.headers["Authorization"] = f"Bearer {access_token}"
+        
         app.logger.info(f"✓ Azure AD token refreshed successfully")
         app.logger.debug(f"  - New token preview: {access_token[:20]}...{access_token[-20:]}")
         app.logger.debug(f"  - Expires on: {datetime.fromtimestamp(token_response.expires_on).isoformat()}")
+        
+        # Log the actual authorization header being used
+        current_auth = azure_openai_client.default_headers.get("Authorization", "")
+        app.logger.debug(f"  - Current Authorization header: {current_auth[:30]}...{current_auth[-20:]}")
         
     except Exception as e:
         app.logger.error(f"✗ Failed to refresh Azure AD token: {str(e)}")
@@ -1136,26 +1153,42 @@ def analyze_step(cluster_id, step_id):
             app.logger.error(f"Error fetching driver logs: {str(e)}", exc_info=True)
         
         # Prepare prompt for Azure OpenAI
-        prompt = f"""Analyze this EMR step execution and provide a concise summary:
+        if step_state == 'FAILED':
+            prompt = f"""Analyze this failed EMR step. Be concise and direct.
 
-Step Name: {step_name}
-Step State: {step_state}
-Step ID: {step_id}
+Step: {step_name} ({step_id})
+State: {step_state}
 
-Timeline from stderr (state transitions):
+Timeline:
 {timeline_info}
 
-Driver Execution Log:
+Error logs:
 {driver_log_content}
 
-Please provide:
-1. Execution Summary (2-3 sentences explaining what happened)
-2. For failures: Root cause analysis and specific error
-3. For success: Key metrics and performance insights
-4. Wait time analysis (time spent in ACCEPTED state before RUNNING)
-5. Any warnings or optimization suggestions observed
+Provide only:
+1. Root cause (1-2 sentences)
+2. Specific error message
+3. Fix recommendation (1-2 bullets)
 
-Keep the response under 300 words and focus on actionable insights."""
+Limit response to 150 words. No verbose explanations."""
+        else:
+            prompt = f"""Analyze this EMR step execution. Be concise.
+
+Step: {step_name} ({step_id})
+State: {step_state}
+
+Timeline:
+{timeline_info}
+
+Execution metrics:
+{driver_log_content}
+
+Provide only:
+1. What ran (1 sentence)
+2. Key metrics (records, time, data size)
+3. Performance issues if any (1-2 bullets)
+
+Limit response to 150 words."""
 
         # Call Azure OpenAI with retry logic
         app.logger.info(f"Calling Azure OpenAI for analysis with {len(prompt)} character prompt")
@@ -1172,22 +1205,26 @@ Keep the response under 300 words and focus on actionable insights."""
                 # Refresh Azure AD token before making API call
                 refresh_azure_token()
                 
+                # Log current auth header after refresh
+                current_auth_header = azure_openai_client.default_headers.get("Authorization", "No Auth Header")
+                app.logger.info(f"Authorization header after refresh: {current_auth_header[:50]}...")
+                
                 # Log the actual API call details
                 app.logger.info("Making chat.completions.create call:")
                 app.logger.info(f"  - Model: {AZURE_OPENAI_DEPLOYMENT_NAME}")
                 app.logger.info(f"  - Temperature: 0.3")
-                app.logger.info(f"  - Max tokens: 500")
+                app.logger.info(f"  - Max tokens: 200")
                 app.logger.info(f"  - Timeout: 30 seconds")
                 app.logger.debug(f"  - Current headers: {list(azure_openai_client.default_headers.keys())}")
                 
                 completion = azure_openai_client.chat.completions.create(
                     model=AZURE_OPENAI_DEPLOYMENT_NAME,
                     messages=[
-                        {"role": "system", "content": "You are an expert in analyzing EMR/Spark job execution logs."},
+                        {"role": "system", "content": "You are a concise EMR/Spark troubleshooting expert. Give direct, actionable answers without fluff."},
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.3,
-                    max_tokens=500,
+                    max_tokens=200,
                     timeout=30
                 )
                 
