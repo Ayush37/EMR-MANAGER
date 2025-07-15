@@ -46,7 +46,7 @@ function App() {
       title: 'S3 Data Viewer',
       shortTitle: 'S3 Data',
       description: 'Browse S3 buckets and view parquet files directly',
-      path: '/s3data',
+      path: '/s3data/',
       color: 'text-purple-500'
     }
   ];
