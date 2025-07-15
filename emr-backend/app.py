@@ -116,6 +116,7 @@ AZURE_USER_ID = os.getenv('AZURE_USER_ID', 'emr-manager')  # User ID for headers
 
 # Initialize Azure OpenAI client if credentials are available
 azure_openai_client = None
+azure_credential = None  # Store credential globally for reuse
 AZURE_OPENAI_ENABLED = False
 
 # Check credentials and initialize Azure AD token provider
@@ -186,7 +187,8 @@ else:
             app.logger.info(f"  - Client ID: {AZURE_SPN_CLIENT_ID}")
             app.logger.info(f"  - Certificate Path: {AZURE_PEM_PATH}")
             
-            credential = CertificateCredential(
+            global azure_credential
+            azure_credential = CertificateCredential(
                 tenant_id=AZURE_TENANT_ID,
                 client_id=AZURE_SPN_CLIENT_ID,
                 certificate_path=AZURE_PEM_PATH
@@ -198,7 +200,7 @@ else:
             app.logger.info("  - Scope: https://cognitiveservices.azure.com/.default")
             
             try:
-                token_response = credential.get_token("https://cognitiveservices.azure.com/.default")
+                token_response = azure_credential.get_token("https://cognitiveservices.azure.com/.default")
                 access_token = token_response.token
                 app.logger.info(f"✓ Successfully obtained Azure AD access token")
                 app.logger.info(f"  - Token length: {len(access_token)} characters")
@@ -235,7 +237,7 @@ else:
             )
             
             # Store credential for token refresh
-            azure_openai_client._credential = credential
+            azure_openai_client._credential = azure_credential
             
             AZURE_OPENAI_ENABLED = True
             app.logger.info("✓ Azure OpenAI client created successfully")
@@ -285,7 +287,7 @@ else:
             AZURE_OPENAI_ENABLED = False
 
 def refresh_azure_token():
-    """Refresh Azure AD token and update OpenAI client headers"""
+    """Force a completely new Azure AD token for every request"""
     if not AZURE_OPENAI_ENABLED:
         return
     
@@ -295,36 +297,52 @@ def refresh_azure_token():
         return
     
     try:
-        app.logger.info("Refreshing Azure AD token...")
+        app.logger.info("Getting new Azure AD token for request...")
         
-        # Force get a new token (don't rely on cached tokens)
+        # Clear any cached tokens in the credential provider
+        if hasattr(azure_openai_client._credential, '_token_cache'):
+            azure_openai_client._credential._token_cache.clear()
+            app.logger.debug("Cleared credential token cache")
+        
+        # Force get a completely new token
+        import time
+        current_time = int(time.time())
         token_response = azure_openai_client._credential.get_token(
             "https://cognitiveservices.azure.com/.default",
-            enable_cae=True  # Force fresh token
+            enable_cae=True,  # Force fresh token
+            claims=f"timestamp={current_time}"  # Force unique request
         )
         access_token = token_response.token
         
-        # Clear and update the headers
-        if "Authorization" in azure_openai_client.default_headers:
-            del azure_openai_client.default_headers["Authorization"]
-        
+        # Completely reset all headers
+        azure_openai_client.default_headers.clear()
         azure_openai_client.default_headers["Authorization"] = f"Bearer {access_token}"
+        azure_openai_client.default_headers["x-ms-useragent"] = AZURE_USER_ID
         
-        # Also update any cached headers in the client's session
-        if hasattr(azure_openai_client, '_client') and hasattr(azure_openai_client._client, 'headers'):
-            azure_openai_client._client.headers["Authorization"] = f"Bearer {access_token}"
+        # Force update internal client headers if they exist
+        if hasattr(azure_openai_client, '_client'):
+            if hasattr(azure_openai_client._client, 'headers'):
+                azure_openai_client._client.headers.clear()
+                azure_openai_client._client.headers.update(azure_openai_client.default_headers)
+            
+            # Also clear any session caches
+            if hasattr(azure_openai_client._client, '_session'):
+                azure_openai_client._client._session = None
+                app.logger.debug("Cleared client session cache")
         
-        app.logger.info(f"✓ Azure AD token refreshed successfully")
-        app.logger.debug(f"  - New token preview: {access_token[:20]}...{access_token[-20:]}")
-        app.logger.debug(f"  - Expires on: {datetime.fromtimestamp(token_response.expires_on).isoformat()}")
+        app.logger.info(f"✓ New Azure AD token obtained successfully")
+        app.logger.info(f"  - Token preview: {access_token[:20]}...{access_token[-20:]}")
+        app.logger.info(f"  - Expires on: {datetime.fromtimestamp(token_response.expires_on).isoformat()}")
+        app.logger.info(f"  - Time until expiry: {token_response.expires_on - current_time} seconds")
         
-        # Log the actual authorization header being used
+        # Verify the header is set correctly
         current_auth = azure_openai_client.default_headers.get("Authorization", "")
-        app.logger.debug(f"  - Current Authorization header: {current_auth[:30]}...{current_auth[-20:]}")
+        app.logger.info(f"  - Authorization header set: {current_auth[:30]}...")
         
     except Exception as e:
-        app.logger.error(f"✗ Failed to refresh Azure AD token: {str(e)}")
+        app.logger.error(f"✗ Failed to get new Azure AD token: {str(e)}")
         app.logger.error(f"  - Error type: {type(e).__name__}")
+        app.logger.error(f"  - Full error: {repr(e)}")
         raise
 
 # Request logging middleware
@@ -1202,12 +1220,37 @@ Limit response to 150 words."""
             try:
                 app.logger.info(f"Attempt {attempt + 1}/{max_retries} - Making Azure OpenAI API call")
                 
-                # Refresh Azure AD token before making API call
+                # Force a completely new token for this request
                 refresh_azure_token()
                 
                 # Log current auth header after refresh
                 current_auth_header = azure_openai_client.default_headers.get("Authorization", "No Auth Header")
                 app.logger.info(f"Authorization header after refresh: {current_auth_header[:50]}...")
+                
+                # On retry attempts, recreate the client to ensure no stale connections
+                if attempt > 0:
+                    app.logger.warning(f"Recreating Azure OpenAI client for retry attempt {attempt + 1}")
+                    global azure_openai_client
+                    
+                    # Get fresh token for new client
+                    token_response = azure_openai_client._credential.get_token(
+                        "https://cognitiveservices.azure.com/.default",
+                        enable_cae=True
+                    )
+                    
+                    # Create new client instance
+                    azure_openai_client = AzureOpenAI(
+                        azure_endpoint=AZURE_OPENAI_ENDPOINT,
+                        api_key=AZURE_OPENAI_API_KEY,
+                        api_version=AZURE_OPENAI_API_VERSION,
+                        default_headers={
+                            "Authorization": f"Bearer {token_response.token}",
+                            "x-ms-useragent": AZURE_USER_ID
+                        }
+                    )
+                    # Store credential for future refreshes
+                    azure_openai_client._credential = azure_credential
+                    app.logger.info("✓ New Azure OpenAI client created with fresh token")
                 
                 # Log the actual API call details
                 app.logger.info("Making chat.completions.create call:")
