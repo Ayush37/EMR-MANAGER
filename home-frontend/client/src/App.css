@@ -1,3 +1,10 @@
+/* AWS-XCESS Custom Styles */
+
+/* Smooth transitions for dark mode */
+* {
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
 /* Custom animations */
 @keyframes fadeIn {
   from {
@@ -32,6 +39,10 @@
   background: #f1f1f1;
 }
 
+.dark ::-webkit-scrollbar-track {
+  background: #1f2937;
+}
+
 ::-webkit-scrollbar-thumb {
   background: #888;
   border-radius: 4px;
@@ -39,4 +50,71 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: #555;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #4b5563;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+/* Prevent iframe from interfering with sidebar transitions */
+iframe {
+  pointer-events: auto;
+}
+
+/* Sidebar transition improvements */
+.sidebar-transition {
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Loading animation improvements */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Glass morphism effect for cards in dark mode */
+.dark .glass-morphism {
+  background: rgba(31, 41, 55, 0.8);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(75, 85, 99, 0.3);
+}
+
+/* AWS color utilities */
+.text-aws-squid {
+  color: #232F3E;
+}
+
+.text-aws-smile {
+  color: #FF9900;
+}
+
+.bg-aws-squid {
+  background-color: #232F3E;
+}
+
+.bg-aws-smile {
+  background-color: #FF9900;
+}
+
+.bg-aws-blue {
+  background-color: #146EB4;
+}
+
+/* Hover effects for service cards */
+.service-card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.service-card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
 }
