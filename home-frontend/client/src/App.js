@@ -12,7 +12,9 @@ import {
   ChevronRightIcon,
   ChevronLeftIcon,
   HomeIcon,
-  Squares2X2Icon
+  Squares2X2Icon,
+  CpuChipIcon,
+  CurrencyDollarIcon
 } from '@heroicons/react/24/outline';
 
 function App() {
@@ -29,7 +31,8 @@ function App() {
       shortTitle: 'EMR',
       description: 'Manage Amazon EMR clusters across multiple environments',
       path: '/emr',
-      color: 'text-aws-smile'
+      color: 'text-aws-smile',
+      status: 'active'
     },
     {
       id: 'ssm',
@@ -38,7 +41,8 @@ function App() {
       shortTitle: 'SSM',
       description: 'Browse and manage AWS Systems Manager Parameter Store',
       path: '/parameters',
-      color: 'text-green-500'
+      color: 'text-green-500',
+      status: 'active'
     },
     {
       id: 's3data',
@@ -47,7 +51,28 @@ function App() {
       shortTitle: 'S3 Data',
       description: 'Browse S3 buckets and view parquet files directly',
       path: '/s3data/',
-      color: 'text-purple-500'
+      color: 'text-purple-500',
+      status: 'active'
+    },
+    {
+      id: 'databricks',
+      icon: CpuChipIcon,
+      title: 'Databricks',
+      shortTitle: 'Databricks',
+      description: 'Manage Databricks workspaces and clusters',
+      path: '/databricks',
+      color: 'text-red-500',
+      status: 'wip'
+    },
+    {
+      id: 'cost',
+      icon: CurrencyDollarIcon,
+      title: 'Cost Estimation',
+      shortTitle: 'Cost',
+      description: 'Analyze and estimate AWS resource costs',
+      path: '/cost-estimation',
+      color: 'text-blue-500',
+      status: 'wip'
     }
   ];
 
@@ -79,8 +104,21 @@ function App() {
   }, [darkMode]);
 
   const handleServiceChange = (serviceId) => {
+    const service = services.find(s => s.id === serviceId);
+    
+    // Check if service is WIP
+    if (service && service.status === 'wip') {
+      // For WIP services, just show them as selected but don't load iframe
+      setActiveService(serviceId);
+      setIframeLoading(false);
+      window.history.pushState({}, '', `/services/${serviceId}`);
+      return;
+    }
+    
     setActiveService(serviceId);
-    setIframeLoading(true);
+    if (serviceId !== 'dashboard') {
+      setIframeLoading(true);
+    }
     
     // Update URL without page reload
     if (serviceId === 'dashboard') {
@@ -214,8 +252,15 @@ function App() {
                     <div
                       key={service.id}
                       onClick={() => handleServiceChange(service.id)}
-                      className="bg-white dark:bg-gray-900 rounded-lg shadow-md hover:shadow-xl transition-all duration-300 transform hover:scale-105 cursor-pointer border border-gray-200 dark:border-gray-700 overflow-hidden"
+                      className={`bg-white dark:bg-gray-900 rounded-lg shadow-md hover:shadow-xl transition-all duration-300 transform hover:scale-105 cursor-pointer border border-gray-200 dark:border-gray-700 overflow-hidden relative ${
+                        service.status === 'wip' ? 'opacity-75' : ''
+                      }`}
                     >
+                      {service.status === 'wip' && (
+                        <div className="absolute top-2 right-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded-full font-semibold">
+                          COMING SOON
+                        </div>
+                      )}
                       <div className="p-6">
                         <div className="flex items-center justify-between mb-4">
                           <div className={`p-3 rounded-lg bg-gray-100 dark:bg-gray-800`}>
@@ -233,7 +278,10 @@ function App() {
                       <div className={`h-1 bg-gradient-to-r ${
                         service.id === 'emr' ? 'from-aws-smile to-aws-blue' :
                         service.id === 'ssm' ? 'from-green-500 to-green-600' :
-                        'from-purple-500 to-purple-600'
+                        service.id === 's3data' ? 'from-purple-500 to-purple-600' :
+                        service.id === 'databricks' ? 'from-red-500 to-red-600' :
+                        service.id === 'cost' ? 'from-blue-500 to-blue-600' :
+                        'from-gray-500 to-gray-600'
                       }`}></div>
                     </div>
                   ))}
@@ -261,6 +309,28 @@ function App() {
                       </p>
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+          ) : currentService?.status === 'wip' ? (
+            <div className="h-full flex items-center justify-center bg-gray-50 dark:bg-gray-800">
+              <div className="text-center max-w-md">
+                <div className={`inline-flex p-6 rounded-full bg-gray-100 dark:bg-gray-700 mb-6`}>
+                  <currentService.icon className={`h-16 w-16 ${currentService.color}`} />
+                </div>
+                <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+                  {currentService.title}
+                </h2>
+                <p className="text-lg text-gray-600 dark:text-gray-400 mb-6">
+                  {currentService.description}
+                </p>
+                <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+                  <p className="text-yellow-800 dark:text-yellow-200 font-semibold">
+                    🚧 This feature is currently under development
+                  </p>
+                  <p className="text-yellow-700 dark:text-yellow-300 text-sm mt-2">
+                    Check back soon for updates!
+                  </p>
                 </div>
               </div>
             </div>
