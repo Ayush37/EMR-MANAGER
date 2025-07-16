@@ -28,7 +28,16 @@ const LogViewer = ({ file, onClose }) => {
       setError(null);
 
       const data = await emrServerlessService.getFileContent(file.path);
-      setLogContent(data.content);
+      console.log('Log data received:', data);
+      console.log('Content length:', data.content ? data.content.length : 0);
+      console.log('Content preview:', data.content ? data.content.substring(0, 100) : 'null');
+      
+      // Ensure we have content to display
+      if (!data.content || data.content === '[Empty log file]') {
+        setLogContent('[Empty log file - no content available]');
+      } else {
+        setLogContent(data.content);
+      }
       setTruncated(data.truncated);
       
     } catch (err) {
@@ -102,8 +111,37 @@ const LogViewer = ({ file, onClose }) => {
 
   const handleDownload = async () => {
     try {
-      const result = await emrServerlessService.getDownloadUrl(file.path);
-      window.open(result.downloadUrl, '_blank');
+      // Create a download link to trigger direct download
+      const downloadUrl = `${process.env.REACT_APP_API_URL || ''}/serverless-api/download?path=${encodeURIComponent(file.path)}`;
+      
+      console.log('Download URL:', downloadUrl);
+      console.log('File path:', file.path);
+      
+      // Use fetch to download with credentials
+      const response = await fetch(downloadUrl, {
+        method: 'GET',
+        credentials: 'same-origin'
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      // Create blob from response
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      
+      // Create a temporary anchor element to trigger download
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = file.name.replace('.gz', ''); // Remove .gz extension if present
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Clean up
+      window.URL.revokeObjectURL(url);
+      
       toast.success('Download started');
     } catch (err) {
       console.error('Error downloading file:', err);

@@ -244,12 +244,21 @@ def get_file():
         response = s3.get_object(Bucket=S3_BUCKET, Key=file_path)
         file_content = response['Body'].read()
         
+        app.logger.info(f'Retrieved file from S3, size: {len(file_content)} bytes')
+        
+        # Log first few bytes to check file format
+        if len(file_content) > 0:
+            header_bytes = file_content[:20]
+            app.logger.debug(f'File header (first 20 bytes): {header_bytes.hex()}')
+        
         # Check if it's a gzipped file
         if file_path.endswith('.gz'):
             try:
                 # Decompress the content
                 decompressed_content = gzip.decompress(file_content)
                 content = decompressed_content.decode('utf-8', errors='replace')
+                
+                app.logger.info(f'Decompressed content size: {len(content)} characters')
                 
                 # Limit content size for UI display (10MB)
                 max_size = 10 * 1024 * 1024
@@ -258,6 +267,13 @@ def get_file():
                     truncated = True
                 else:
                     truncated = False
+                
+                # Handle empty content
+                if not content or content.strip() == '':
+                    app.logger.warning(f'File appears to be empty after decompression: {file_path}')
+                    content = '[Empty log file]'
+                else:
+                    app.logger.info(f'Successfully decompressed file, content length: {len(content)} characters')
                 
                 return jsonify({
                     'content': content,
@@ -274,6 +290,8 @@ def get_file():
             try:
                 content = file_content.decode('utf-8', errors='replace')
                 
+                app.logger.info(f'Non-gzipped content size: {len(content)} characters')
+                
                 # Limit content size
                 max_size = 10 * 1024 * 1024
                 if len(content) > max_size:
@@ -281,6 +299,13 @@ def get_file():
                     truncated = True
                 else:
                     truncated = False
+                
+                # Handle empty content
+                if not content or content.strip() == '':
+                    app.logger.warning(f'Non-gzipped file appears to be empty: {file_path}')
+                    content = '[Empty log file]'
+                else:
+                    app.logger.info(f'Successfully read non-gzipped file, content length: {len(content)} characters')
                 
                 return jsonify({
                     'content': content,
@@ -305,31 +330,76 @@ def get_file():
 # Download file
 @app.route(f'{URL_PREFIX}/download', methods=['GET'])
 def download_file():
-    """Generate presigned URL for file download"""
+    """Download file directly from S3"""
     try:
         file_path = request.args.get('path')
         if not file_path:
             return jsonify({'error': 'File path is required'}), 400
         
-        app.logger.info(f'Generating download URL for: {S3_BUCKET}/{file_path}')
+        app.logger.info(f'Downloading file from S3: {S3_BUCKET}/{file_path}')
         
-        # Generate presigned URL valid for 1 hour
-        presigned_url = s3.generate_presigned_url(
-            'get_object',
-            Params={'Bucket': S3_BUCKET, 'Key': file_path},
-            ExpiresIn=3600
+        # Get the file from S3
+        try:
+            response = s3.get_object(Bucket=S3_BUCKET, Key=file_path)
+            file_content = response['Body'].read()
+            app.logger.info(f'Successfully retrieved file, size: {len(file_content)} bytes')
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                app.logger.error(f'File not found: {file_path}')
+                return jsonify({'error': 'File not found'}), 404
+            else:
+                app.logger.error(f'S3 error: {str(e)}')
+                return jsonify({'error': f'S3 error: {str(e)}'}), 500
+        
+        # Determine filename
+        filename = file_path.split('/')[-1]
+        
+        # If it's a gzipped file, decompress it for download
+        if filename.endswith('.gz'):
+            try:
+                # Decompress the content
+                decompressed_content = gzip.decompress(file_content)
+                content = decompressed_content
+                # Remove .gz extension from filename
+                filename = filename[:-3]
+                app.logger.info(f'Decompressed file, new size: {len(content)} bytes')
+            except Exception as e:
+                app.logger.error(f'Error decompressing file: {str(e)}')
+                # If decompression fails, return the original gzipped content
+                content = file_content
+        else:
+            content = file_content
+        
+        # Log content preview for debugging
+        if len(content) == 0:
+            app.logger.warning(f'File content is empty for: {file_path}')
+        else:
+            preview = content[:100].decode('utf-8', errors='replace') if isinstance(content, bytes) else str(content)[:100]
+            app.logger.info(f'Content preview: {preview}...')
+        
+        # Return as downloadable file
+        response = Response(
+            content,
+            mimetype='text/plain',
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"',
+                'Content-Type': 'text/plain; charset=utf-8',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET',
+                'Access-Control-Allow-Headers': 'Content-Type'
+            }
         )
-        
-        return jsonify({
-            'downloadUrl': presigned_url,
-            'fileName': file_path.split('/')[-1]
-        }), 200
+        return response
         
     except ClientError as e:
-        app.logger.error(f'AWS error generating download URL: {str(e)}')
-        return jsonify({'error': f'AWS error: {str(e)}'}), 500
+        if e.response['Error']['Code'] == 'NoSuchKey':
+            app.logger.error(f'File not found: {file_path}')
+            return jsonify({'error': 'File not found'}), 404
+        else:
+            app.logger.error(f'AWS error downloading file: {str(e)}')
+            return jsonify({'error': f'AWS error: {str(e)}'}), 500
     except Exception as e:
-        app.logger.error(f'Error generating download URL: {str(e)}')
+        app.logger.error(f'Error downloading file: {str(e)}')
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
