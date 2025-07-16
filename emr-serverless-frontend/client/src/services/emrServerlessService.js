@@ -9,7 +9,7 @@ class EmrServerlessService {
         limit: limit.toString()
       });
 
-      const response = await fetch(`${API_BASE_URL}/emr-serverless-api/list?${params}`, {
+      const response = await fetch(`${API_BASE_URL}/serverless-api/list?${params}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -31,7 +31,7 @@ class EmrServerlessService {
     try {
       const params = new URLSearchParams({ path });
 
-      const response = await fetch(`${API_BASE_URL}/emr-serverless-api/file?${params}`, {
+      const response = await fetch(`${API_BASE_URL}/serverless-api/file?${params}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -53,7 +53,7 @@ class EmrServerlessService {
     try {
       const params = new URLSearchParams({ path });
 
-      const response = await fetch(`${API_BASE_URL}/emr-serverless-api/download?${params}`, {
+      const response = await fetch(`${API_BASE_URL}/serverless-api/download?${params}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',

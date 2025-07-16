@@ -18,7 +18,7 @@ ENV PORT="3700"
 ENV LOG_LEVEL="INFO"
 ENV USE_IAM_ROLE="true"
 ENV AWS_REGION="us-east-1"
-ENV URL_PREFIX="/emr-serverless-api"
+ENV URL_PREFIX="/serverless-api"
 
 # Set the working directory
 WORKDIR /app

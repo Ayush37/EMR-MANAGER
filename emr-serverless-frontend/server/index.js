@@ -5,13 +5,13 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 
 // Serve static files from the React app build directory
-// For ALB routing, we need to serve from /emr-serverless path
-app.use('/emr-serverless', express.static(path.join(__dirname, '../client/build')));
+// For ALB routing, we need to serve from /serverless path
+app.use('/serverless', express.static(path.join(__dirname, '../client/build')));
 app.use(express.static(path.join(__dirname, '../client/build')));
 
-// Redirect /emr-serverless to /emr-serverless/ for proper routing
-app.get('/emr-serverless', (req, res) => {
-  res.redirect('/emr-serverless/');
+// Redirect /serverless to /serverless/ for proper routing
+app.get('/serverless', (req, res) => {
+  res.redirect('/serverless/');
 });
 
 // Health check endpoint for monitoring

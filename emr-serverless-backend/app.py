@@ -16,7 +16,7 @@ app = Flask(__name__)
 CORS(app)
 
 # Configure URL prefix for ALB routing
-URL_PREFIX = os.getenv('URL_PREFIX', '/emr-serverless-api')
+URL_PREFIX = os.getenv('URL_PREFIX', '/serverless-api')
 
 # Configure logging
 log_level = os.getenv('LOG_LEVEL', 'INFO').upper()

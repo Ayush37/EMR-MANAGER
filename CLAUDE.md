@@ -142,10 +142,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | EMR | `/api/*` | `/emr/*` | 3700 | 8080 |
 | SSM | `/ssm-api/*` | `/parameters/*` | 3700 | 8080 |
 | S3 Data | `/s3data-api/*` | `/s3data/*` | 3700 | 8080 |
-| EMR Serverless | `/emr-serverless-api/*` | `/emr-serverless/*` | 3700 | 8080 |
+| EMR Serverless | `/serverless-api/*` | `/serverless/*` | 3700 | 8080 |
 
 **Health Check Endpoints**:
-- EMR Serverless Backend: `/emr-serverless-api/health`
+- EMR Serverless Backend: `/serverless-api/health`
 - EMR Serverless Frontend: `/health`
 
 ### Known Issues and Solutions
@@ -234,8 +234,8 @@ To continue work, reference:
    - Changed from setuptools to Poetry pyproject.toml format
    
 3. **ALB Routing Setup**:
-   - Backend: `/emr-serverless-api/*` → port 3700
-   - Frontend: `/emr-serverless/*` → port 8080
+   - Backend: `/serverless-api/*` → port 3700
+   - Frontend: `/serverless/*` → port 8080
    - Health checks configured for both services
 
 ## Project Overview
@@ -421,10 +421,10 @@ npm start
 - `GET /s3data-api/health`: Health check endpoint
 
 ### EMR Serverless Log Viewer Service
-- `GET /emr-serverless-api/list`: List objects in S3 path (?prefix=path&page=1&limit=50)
-- `GET /emr-serverless-api/file`: Get file content with decompression for .gz files
-- `GET /emr-serverless-api/download`: Generate presigned URL for file download
-- `GET /emr-serverless-api/health`: Health check endpoint
+- `GET /serverless-api/list`: List objects in S3 path (?prefix=path&page=1&limit=50)
+- `GET /serverless-api/file`: Get file content with decompression for .gz files
+- `GET /serverless-api/download`: Generate presigned URL for file download
+- `GET /serverless-api/health`: Health check endpoint
 
 ## Development Workflow
 
@@ -479,7 +479,7 @@ npm start
 1. **Backend** (Terminal 1):
    ```bash
    cd emr-serverless-backend
-   # For local development, remove the /emr-serverless-api prefix
+   # For local development, remove the /serverless-api prefix
    echo "URL_PREFIX=" > .env
    pip install -r requirements.txt
    python app.py  # Runs on port 3700
@@ -510,8 +510,8 @@ The project uses Docker for containerization:
   - `/parameters/*` → SSM frontend service
   - `/s3data-api/*` → S3 Data backend service
   - `/s3data/*` → S3 Data frontend service
-  - `/emr-serverless-api/*` → EMR Serverless backend service
-  - `/emr-serverless/*` → EMR Serverless frontend service
+  - `/serverless-api/*` → EMR Serverless backend service
+  - `/serverless/*` → EMR Serverless frontend service
 - Base URL: `https://accessaws-uat.prod.aws.jpmchase.net`
 
 ### API URL Configuration

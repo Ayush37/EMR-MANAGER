@@ -61,7 +61,7 @@ function App() {
       title: 'EMR Serverless Logs',
       shortTitle: 'Serverless',
       description: 'Browse and view EMR Serverless application logs',
-      path: '/emr-serverless/',
+      path: '/serverless/',
       color: 'text-cyan-500',
       status: 'active'
     },
