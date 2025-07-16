@@ -179,7 +179,6 @@ else:
     # First try Azure AD authentication if Service Principal credentials are available
     if not sp_missing:
         try:
-            global azure_credential
             app.logger.info("Attempting Azure AD + API Key hybrid authentication...")
             
             # Initialize Service Principal credential for Azure AD token
