@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "emr-serverless-backend"
+version = "0.1.0"
+dependencies = [
+    "Flask==2.2.3",
+    "boto3==1.28.57",
+    "botocore==1.31.57", 
+    "flask-cors==4.0.0",
+    "waitress==2.1.2",
+    "python-dateutil==2.8.2",
+    "Werkzeug==2.3.7",
+    "python-dotenv==1.0.0",
+    "toml==0.10.2"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]

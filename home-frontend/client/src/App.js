@@ -14,7 +14,8 @@ import {
   HomeIcon,
   Squares2X2Icon,
   CpuChipIcon,
-  CurrencyDollarIcon
+  CurrencyDollarIcon,
+  CommandLineIcon
 } from '@heroicons/react/24/outline';
 
 function App() {
@@ -52,6 +53,16 @@ function App() {
       description: 'Browse S3 buckets and view parquet files directly',
       path: '/s3data/',
       color: 'text-purple-500',
+      status: 'active'
+    },
+    {
+      id: 'emr-serverless',
+      icon: CommandLineIcon,
+      title: 'EMR Serverless Logs',
+      shortTitle: 'Serverless',
+      description: 'Browse and view EMR Serverless application logs',
+      path: '/emr-serverless/',
+      color: 'text-cyan-500',
       status: 'active'
     },
     {
@@ -279,6 +290,7 @@ function App() {
                         service.id === 'emr' ? 'from-aws-smile to-aws-blue' :
                         service.id === 'ssm' ? 'from-green-500 to-green-600' :
                         service.id === 's3data' ? 'from-purple-500 to-purple-600' :
+                        service.id === 'emr-serverless' ? 'from-cyan-500 to-cyan-600' :
                         service.id === 'databricks' ? 'from-red-500 to-red-600' :
                         service.id === 'cost' ? 'from-blue-500 to-blue-600' :
                         'from-gray-500 to-gray-600'

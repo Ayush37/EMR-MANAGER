@@ -2,21 +2,82 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Current Status (Last Updated: 2025-07-14)
+## Current Status (Last Updated: 2025-07-16)
 
 ### Working Features
 - ✅ EMR cluster management with multi-environment support (UAT1/2/3)
 - ✅ Advanced filtering: search across all clusters, multi-state filtering
 - ✅ Step management: view, duplicate, cancel steps
 - ✅ SSM parameter management with full CRUD
-- ✅ **S3 Data Viewer service** (NEW) - Browse and preview parquet files
-- ✅ All three services deployed to ECS with ALB routing
+- ✅ **S3 Data Viewer service** - Browse and preview parquet files
+- ✅ **EMR Serverless Log Viewer** (NEW) - Browse and view EMR Serverless application logs
+- ✅ **AWS-XCESS Portal** - Unified interface for all services
+- ✅ All services deployed to ECS with ALB routing
 - ✅ IAM role-based authentication for ECS
 - ✅ Health checks configured for ECS (dual endpoints)
 - ✅ Step logs viewer - View stdout/stderr from S3 for both steps and containers
-- ✅ AI-powered step analysis using Azure OpenAI (hybrid auth)
+- ✅ AI-powered step analysis using Azure OpenAI (FIXED: token expiration)
 
-### Recent Session Work (2025-07-14)
+### Recent Session Work (2025-07-16)
+
+1. **Azure OpenAI Token Expiration Fix** ✅:
+   - **Problem**: Tokens expired after ~1 hour causing "invalid token" errors
+   - **Root Cause**: Reusing same OpenAI client with stale tokens
+   - **Analysis**: Examined LROT_AZURE.py which never has token issues
+   - **Solution**: Adopted LROT_AZURE.py pattern - create new client per request
+   - **Implementation**: 
+     - Replaced `refresh_azure_token()` with `create_new_openai_client()`
+     - Each request now creates fresh client with new token
+     - No more global client or token caching
+   - **Result**: Token expiration issues completely resolved
+
+2. **Python Global Variable Fixes**:
+   - Fixed "azure_credential assigned before global declaration" at line 182
+   - Fixed similar issue with azure_openai_client at line 1232
+   - Moved global declarations before any usage
+
+3. **AWS-XCESS Portal Implementation** ✅:
+   - **Complete Redesign**: Transformed home-frontend into unified portal
+   - **Branding**: New AWS-XCESS brand with professional UI
+   - **Architecture**: Side navigation with iframe-based service loading
+   - **Features**:
+     - Collapsible sidebar navigation
+     - Dark mode toggle
+     - Services load in iframes (single page experience)
+     - Browser history management
+     - Loading states and transitions
+     - Dashboard with service tiles
+   - **Added WIP Services**: 
+     - Databricks (coming soon)
+     - Cost Estimation (coming soon)
+   - **Fixed**: S3 Data service iframe routing (added trailing slash)
+
+4. **ECS Health Check Improvements**:
+   - Increased timeout to 20s for Azure OpenAI initialization
+   - Set start period to 120s
+   - Fixed egress rules for port 443 (HTTPS to Azure)
+
+5. **Documentation Updates**:
+   - Updated CLAUDE.md with all session changes
+   - Added known issues and solutions section
+   - Documented LROT_AZURE.py pattern for future reference
+
+6. **EMR Serverless Log Viewer Implementation** ✅:
+   - **Purpose**: View EMR Serverless application logs from S3
+   - **S3 Bucket**: `app-id-107923-dep-id-107924-uu-id-mpm6sfacq4a8`
+   - **Path Structure**: `logs/serverless/applications/{app_id}/jobs/{job_id}/`
+   - **Features**:
+     - Browse folder hierarchy with breadcrumb navigation
+     - View compressed log files (.gz) with decompression
+     - Syntax highlighting for log levels and timestamps
+     - Search within logs with highlighting
+     - Auto-refresh for running jobs
+     - Download original files
+     - Pagination for large directories
+   - **Reused Components**: LogViewer from EMR service
+   - **Added to AWS-XCESS**: New cyan-colored tile
+
+### Previous Session Work (2025-07-14)
 
 1. **S3 Data Viewer Service Implementation**:
    - Full service implementation following established patterns
@@ -68,9 +129,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### ALB Routing Configuration
 | Service | Backend Path | Frontend Path | Backend Port | Frontend Port |
 |---------|--------------|---------------|--------------|---------------|
+| AWS-XCESS Portal | - | `/` | - | 8080 |
 | EMR | `/api/*` | `/emr/*` | 3700 | 8080 |
 | SSM | `/ssm-api/*` | `/parameters/*` | 3700 | 8080 |
 | S3 Data | `/s3data-api/*` | `/s3data/*` | 3700 | 8080 |
+| EMR Serverless | `/emr-serverless-api/*` | `/emr-serverless/*` | 3700 | 8080 |
 
 ### Known Issues and Solutions
 
@@ -79,29 +142,82 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. **Docker Build Failures**: Remove pandas or use pre-built wheels
 4. **Azure OpenAI Auth Failures**: Check all env vars, PEM file permissions, and use test endpoint
 
+### Known Issues and Solutions
+
+1. **S3 Data Service Loading Issue**: 
+   - If S3 Data shows multiple sidebars, check ALB routing
+   - Ensure `/s3data/*` routes to S3 Data frontend, not home frontend
+   - Temporary fix: Added trailing slash to path in home-frontend App.js
+
+2. **Azure OpenAI Token Expiration** ✅ **FIXED**:
+   - **Previous Pattern (PROBLEMATIC)**:
+     ```python
+     # Global client reused across requests
+     azure_openai_client = None
+     
+     def refresh_azure_token():
+         # Tried to refresh token on existing client
+         azure_openai_client.default_headers["Authorization"] = f"Bearer {new_token}"
+     ```
+   - **New Pattern (FROM LROT_AZURE.py)**:
+     ```python
+     def create_new_openai_client():
+         # Create fresh client for each request
+         token_response = azure_credential.get_token("https://cognitiveservices.azure.com/.default")
+         client = AzureOpenAI(
+             azure_endpoint=AZURE_OPENAI_ENDPOINT,
+             api_key=AZURE_OPENAI_API_KEY,
+             api_version=AZURE_OPENAI_API_VERSION,
+             default_headers={
+                 "Authorization": f"Bearer {token_response.token}",
+                 "x-ms-useragent": AZURE_USER_ID
+             }
+         )
+         return client
+     ```
+   - **Result**: No more token expiration issues
+
+3. **Python Global Declaration Errors** ✅ **FIXED**:
+   - Error: "name 'azure_credential' is assigned before global declaration"
+   - Solution: Variables at module level don't need global declaration
+   - Only use `global` when modifying from within a function
+
+4. **ECS Deployment Issues** ✅ **FIXED**:
+   - Security group needed egress rule for port 443
+   - Health check timeouts during Azure OpenAI initialization
+   - Solution: Increased timeout to 20s, start period to 120s
+
 ### Next Steps
-1. Add DynamoDB service following established patterns
-2. Enhance S3 Data Viewer with:
+1. **Fix ALB routing for S3 Data service** if still showing multiple sidebars
+2. **Implement Databricks integration** (currently shows WIP page in AWS-XCESS)
+3. **Implement Cost Estimation service** (currently shows WIP page in AWS-XCESS)
+4. **Add DynamoDB service** following established patterns
+5. **Enhance S3 Data Viewer** with:
    - File upload capability
    - Support for more file formats (JSON, CSV input)
    - Folder creation/deletion
-3. Add cluster creation functionality to EMR
-4. Implement batch operations across services
+6. **Consider cluster-level efficiency analysis** using CloudWatch metrics
+7. **Add caching for AI analysis** to avoid re-analyzing completed steps
 
 ### For Next Session
 To continue work, reference:
 - This CLAUDE.md file for complete project context
-- Check git log for detailed commit messages
-- All services use similar patterns - copy from S3 Data or SSM
-- Test endpoints locally with URL_PREFIX="" for debugging
+- Recent commits show Azure OpenAI token fix and AWS-XCESS portal
+- LROT_AZURE.py demonstrates the working token pattern
+- AWS-XCESS portal at `/` provides unified access to all services
+- Test Azure OpenAI with GET /api/test-azure-openai endpoint
+- All services follow similar patterns - use S3 Data as latest template
 
 ## Project Overview
 
 EMR-MANAGER is a multi-service web application platform for managing various AWS services. Currently implemented:
 1. **EMR Service**: Manage Amazon EMR (Elastic MapReduce) clusters with multi-environment support
 2. **SSM Service**: Manage AWS Systems Manager Parameter Store with full CRUD operations
+3. **S3 Data Viewer**: Browse S3 buckets and preview parquet files with export capabilities
+4. **EMR Serverless Log Viewer**: Browse and view EMR Serverless application logs from S3
+5. **AWS-XCESS Portal**: Unified interface providing single-page access to all services
 
-Future services planned: DynamoDB, S3, and other AWS services following the same architecture.
+Future services planned: DynamoDB, Databricks, Cost Estimation, and other AWS services following the same architecture.
 
 ## Architecture
 
@@ -209,6 +325,18 @@ npm start
 - **Parameter Store Path**: Can browse any path
 - **Required Permissions**: GetParameters, GetParametersHistory, GetParametersByPath, GetParameter, PutParameter (WriteParameterStore)
 
+### S3 Data Viewer Service
+- **AWS Credentials**: Automatically uses IAM roles in ECS, falls back to profile for local development
+- **S3 Buckets**: Environment-specific (UAT1/2/3) with RAW/REFINED types
+- **Required Permissions**: ListBucket, GetObject, S3 access for configured buckets
+
+### EMR Serverless Log Viewer Service
+- **AWS Credentials**: Automatically uses IAM roles in ECS, falls back to profile for local development
+- **S3 Bucket**: `app-id-107923-dep-id-107924-uu-id-mpm6sfacq4a8`
+- **Base Path**: `logs/serverless/`
+- **Structure**: `applications/{app_id}/jobs/{job_id}/`
+- **Required Permissions**: ListBucket, GetObject for the serverless logs bucket
+
 ## Important Implementation Notes
 
 1. **No Direct AWS Access from Frontend**: All AWS operations are proxied through the Python backend for security
@@ -254,6 +382,19 @@ npm start
 - `PUT /ssm-api/parameter/<path:name>`: Update parameter value
 - `GET /ssm-api/parameter/<path:name>/history`: Get parameter history (last 5 versions)
 - `GET /ssm-api/health`: Health check endpoint
+
+### S3 Data Viewer Service
+- `GET /s3data-api/list`: List S3 objects with pagination
+- `GET /s3data-api/preview`: Preview parquet file content
+- `GET /s3data-api/download`: Generate presigned URL for download
+- `GET /s3data-api/export/csv`: Export parquet to CSV
+- `GET /s3data-api/health`: Health check endpoint
+
+### EMR Serverless Log Viewer Service
+- `GET /emr-serverless-api/list`: List objects in S3 path (?prefix=path&page=1&limit=50)
+- `GET /emr-serverless-api/file`: Get file content with decompression for .gz files
+- `GET /emr-serverless-api/download`: Generate presigned URL for file download
+- `GET /emr-serverless-api/health`: Health check endpoint
 
 ## Development Workflow
 
@@ -304,6 +445,25 @@ npm start
    npm start  # Runs on port 3000
    ```
 
+### EMR Serverless Log Viewer Service
+1. **Backend** (Terminal 1):
+   ```bash
+   cd emr-serverless-backend
+   # For local development, remove the /emr-serverless-api prefix
+   echo "URL_PREFIX=" > .env
+   pip install -r requirements.txt
+   python app.py  # Runs on port 3700
+   ```
+
+2. **Frontend** (Terminal 2):
+   ```bash
+   cd emr-serverless-frontend/client
+   # Point to local backend
+   echo "REACT_APP_API_URL=http://localhost:3700" > .env
+   npm install
+   npm start  # Runs on port 3000
+   ```
+
 **Note**: The `.env` files are gitignored and should not be committed. In production, the URL_PREFIX defaults to the correct values for ALB routing.
 
 ## Deployment
@@ -313,10 +473,15 @@ The project uses Docker for containerization:
 - Images are based on enterprise JPMorgan Chase base images
 - Backend runs on port 3700, frontend server on port 8080
 - ECS deployment with ALB routing:
+  - `/` → AWS-XCESS portal (home frontend)
   - `/api/*` → EMR backend service
   - `/emr/*` → EMR frontend service
   - `/ssm-api/*` → SSM backend service
   - `/parameters/*` → SSM frontend service
+  - `/s3data-api/*` → S3 Data backend service
+  - `/s3data/*` → S3 Data frontend service
+  - `/emr-serverless-api/*` → EMR Serverless backend service
+  - `/emr-serverless/*` → EMR Serverless frontend service
 - Base URL: `https://accessaws-uat.prod.aws.jpmchase.net`
 
 ### API URL Configuration
@@ -717,79 +882,55 @@ This session successfully:
 
 The project now has three fully functional services (EMR, SSM, S3 Data) with consistent patterns that can be replicated for additional AWS services.
 
-## Planned: Unified Navigation Portal (Option 5 - Side Navigation)
+## AWS-XCESS Portal Implementation ✅
 
 ### Overview
-Transform the home frontend into a shell application with persistent side navigation that loads services in an embedded content area, keeping users within a single interface.
+AWS-XCESS is the unified portal interface that provides single-page access to all AWS services. Users no longer need multiple browser tabs - all services load within the portal using iframes.
 
-### Architecture Design
+### Architecture
 ```
 +------------------------+--------------------------------+
-|  AWS Services Portal   |                                |
+|     AWS-XCESS         |                                |
+|  ☁ (collapsible)      |                                |
 |                        |                                |
-| ▼ EMR Clusters        |     Service Content Area       |
-| ▷ SSM Parameters      |        (iframe)                |
-| ▷ S3 Data Viewer      |                                |
-|                        |   Loads: /emr, /parameters,    |
-| ─────────────         |          /s3data               |
+| 🏠 Dashboard          |     Service Content Area       |
+| ─────────────         |        (iframe)                |
+| 📊 EMR Clusters       |                                |
+| 📄 SSM Parameters     |   Loads: /emr, /parameters,    |
+| 💾 S3 Data Viewer     |          /s3data               |
+| 🔴 Databricks (WIP)   |                                |
+| 💰 Cost Est. (WIP)    |                                |
 |                        |                                |
-| Notifications (2)      |                                |
-| User: john.doe        |                                |
+| 🌙 Dark Mode          |                                |
 +------------------------+--------------------------------+
 ```
 
-### Implementation Plan
+### Key Features
+1. **Collapsible Sidebar**: Save screen space with toggle button
+2. **Dark Mode**: Toggle between light/dark themes
+3. **Service Loading**: Smooth transitions with loading states
+4. **Browser History**: Back/forward navigation works correctly
+5. **Dashboard View**: Grid layout with service tiles and descriptions
+6. **WIP Services**: Databricks and Cost Estimation show "Coming Soon" pages
 
-#### Phase 1: Home Frontend Transformation
-- Convert to shell/wrapper application
-- Add persistent side navigation component
-- Implement iframe-based content area
-- Add service state management
+### Implementation Details
+- **Path**: Home frontend at `/` (root)
+- **Routing**: `/services/{service-id}` loads service in iframe
+- **State Management**: Active service persisted in URL
+- **Iframe Paths**: 
+  - EMR: `/emr`
+  - SSM: `/parameters`
+  - S3 Data: `/s3data/` (trailing slash required)
 
-#### Phase 2: Service Integration
-- Configure iframe routing:
-  - `/services/emr` → loads `/emr` in iframe
-  - `/services/ssm` → loads `/parameters` in iframe
-  - `/services/s3data` → loads `/s3data` in iframe
-- Implement loading states
-- Add error boundaries
+### Service Integration
+Services work seamlessly within AWS-XCESS without modification. The portal handles:
+- Loading states during service transitions
+- Error boundaries for failed loads
+- Proper iframe sizing and scrolling
+- URL history management
 
-#### Phase 3: Inter-frame Communication
-- PostMessage API for:
-  - Title/breadcrumb updates
-  - Loading state notifications
-  - Error messages
-  - Deep linking between services
-
-#### Phase 4: Service Frontend Adjustments
-- Remove redundant headers from services
-- Adjust padding/margins for embedded view
-- Add "Open in New Tab" option
-- Ensure modals work within iframe bounds
-
-#### Phase 5: Enhanced Features
+### Future Enhancements
+- Inter-frame communication for notifications
+- Global search across services
 - Service health indicators
-- Global notifications area
-- Quick actions/favorites
-- Cross-service search
-
-### Technical Considerations
-
-**Pros:**
-- Unified experience with persistent navigation
-- Services remain independently deployable
-- Minimal changes to existing services
-- Can break out to full page when needed
-
-**Challenges:**
-- Iframe limitations (downloads, popups)
-- Browser history management
-- Performance (multiple React instances)
-- Scrolling behavior needs attention
-
-### Required Changes Summary
-
-1. **Home Frontend**: Major refactor to shell app
-2. **Service Frontends**: Minor layout adjustments
-3. **Backend Services**: No changes needed
-4. **ALB Configuration**: No changes needed
+- User preferences/favorites
