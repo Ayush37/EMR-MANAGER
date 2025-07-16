@@ -88,6 +88,8 @@ setup-py: ## Create setup.py file required for building wheel
 	@echo "        \"waitress==2.1.2\"," >> setup.py
 	@echo "        \"Werkzeug==2.3.7\"," >> setup.py
 	@echo "        \"pyarrow==20.0.0\"," >> setup.py
+	@echo "        \"openai==1.35.3\"," >> setup.py
+	@echo "        \"azure-identity==1.16.0\"," >> setup.py
 	@echo "    ]," >> setup.py
 	@echo "    python_requires=\">=3.9\"," >> setup.py
 	@echo ")" >> setup.py
