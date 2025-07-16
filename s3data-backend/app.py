@@ -14,6 +14,7 @@ import pyarrow.compute as pc
 from io import BytesIO
 import re
 import csv
+import time
 from openai import AzureOpenAI
 from azure.identity import CertificateCredential
 
@@ -94,69 +95,160 @@ AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', '')
 AZURE_TENANT_ID = os.getenv('AZURE_TENANT_ID', '')
 AZURE_SPN_CLIENT_ID = os.getenv('AZURE_SPN_CLIENT_ID', '')
 AZURE_USER_ID = os.getenv('AZURE_USER_ID', 'emr-manager')
+AZURE_PEM_PATH = '/app/azure_cert.pem'
 
-# Azure OpenAI client initialization
+# Azure OpenAI initialization
 azure_credential = None
 AZURE_OPENAI_ENABLED = False
 
-# Check for required Azure OpenAI configuration
-openai_missing = []
+# Log Azure OpenAI configuration
+app.logger.info("=" * 60)
+app.logger.info("Azure OpenAI Configuration Check")
+app.logger.info("=" * 60)
+
+# Check for missing configuration
+missing = []
 if not AZURE_OPENAI_ENDPOINT:
-    openai_missing.append("AZURE_OPENAI_ENDPOINT")
+    missing.append("AZURE_OPENAI_ENDPOINT")
 if not AZURE_OPENAI_API_KEY:
-    openai_missing.append("AZURE_OPENAI_API_KEY")
+    missing.append("AZURE_OPENAI_API_KEY")
 if not AZURE_OPENAI_DEPLOYMENT_NAME:
-    openai_missing.append("AZURE_OPENAI_DEPLOYMENT_NAME")
+    missing.append("AZURE_OPENAI_DEPLOYMENT_NAME")
+
+# Check for Service Principal credentials (for hybrid auth)
+sp_missing = []
 if not AZURE_TENANT_ID:
-    openai_missing.append("AZURE_TENANT_ID")
+    sp_missing.append("AZURE_TENANT_ID")
 if not AZURE_SPN_CLIENT_ID:
-    openai_missing.append("AZURE_SPN_CLIENT_ID")
+    sp_missing.append("AZURE_SPN_CLIENT_ID")
+if not os.path.exists(AZURE_PEM_PATH):
+    sp_missing.append("azure_cert.pem")
 
-pem_path = '/app/azure_cert.pem'
-if not os.path.exists(pem_path):
-    openai_missing.append("azure_cert.pem file")
-
-if openai_missing:
-    app.logger.warning(f"Azure OpenAI not configured. Missing: {', '.join(openai_missing)}")
-    app.logger.warning("Query generation feature will be disabled")
+if missing:
+    app.logger.error(f"✗ Azure OpenAI core settings missing: {', '.join(missing)}")
+    app.logger.error("Query generation feature will be disabled")
     AZURE_OPENAI_ENABLED = False
 else:
-    try:
-        # Initialize Azure credential
-        azure_credential = CertificateCredential(
-            tenant_id=AZURE_TENANT_ID,
-            client_id=AZURE_SPN_CLIENT_ID,
-            certificate_path=pem_path
-        )
-        app.logger.info("Azure credential initialized successfully")
-        AZURE_OPENAI_ENABLED = True
-    except Exception as e:
-        app.logger.error(f"Failed to initialize Azure credential: {str(e)}")
-        AZURE_OPENAI_ENABLED = False
+    # Try hybrid authentication first (Service Principal + API Key)
+    if not sp_missing:
+        try:
+            app.logger.info("Attempting Azure AD + API Key hybrid authentication...")
+            
+            # Initialize Service Principal credential for Azure AD token
+            app.logger.info("Step 1: Creating CertificateCredential...")
+            app.logger.info(f"  - Tenant ID: {AZURE_TENANT_ID}")
+            app.logger.info(f"  - Client ID: {AZURE_SPN_CLIENT_ID}")
+            app.logger.info(f"  - Certificate Path: {AZURE_PEM_PATH}")
+            
+            azure_credential = CertificateCredential(
+                tenant_id=AZURE_TENANT_ID,
+                client_id=AZURE_SPN_CLIENT_ID,
+                certificate_path=AZURE_PEM_PATH
+            )
+            app.logger.info("✓ CertificateCredential created successfully")
+            
+            # Test the credential and get initial token
+            app.logger.info("Step 2: Requesting Azure AD token...")
+            app.logger.info("  - Scope: https://cognitiveservices.azure.com/.default")
+            
+            try:
+                token_response = azure_credential.get_token("https://cognitiveservices.azure.com/.default")
+                access_token = token_response.token
+                app.logger.info(f"✓ Successfully obtained Azure AD access token")
+                app.logger.info(f"  - Token length: {len(access_token)} characters")
+                app.logger.info(f"  - Token preview: {access_token[:20]}...{access_token[-20:]}")
+                app.logger.info(f"  - Expires on: {datetime.fromtimestamp(token_response.expires_on).isoformat()}")
+            except Exception as token_error:
+                app.logger.error(f"✗ Failed to get Azure AD token: {str(token_error)}")
+                app.logger.error(f"  - Error type: {type(token_error).__name__}")
+                if hasattr(token_error, 'error'):
+                    app.logger.error(f"  - Error code: {getattr(token_error, 'error', 'N/A')}")
+                if hasattr(token_error, 'error_description'):
+                    app.logger.error(f"  - Error description: {getattr(token_error, 'error_description', 'N/A')}")
+                raise
+            
+            AZURE_OPENAI_ENABLED = True
+            app.logger.info("=" * 60)
+            app.logger.info("Azure OpenAI integration ENABLED - Hybrid authentication ready")
+            app.logger.info("=" * 60)
+            
+        except Exception as e:
+            app.logger.error("✗ Failed to initialize Azure OpenAI with hybrid authentication")
+            app.logger.error(f"  - Error: {str(e)}")
+            app.logger.error(f"  - Error type: {type(e).__name__}")
+            app.logger.warning("Falling back to API Key only authentication...")
+    else:
+        app.logger.info(f"Service Principal credentials missing: {', '.join(sp_missing)}")
+        app.logger.info("Using API Key authentication only...")
+    
+    # If Azure AD failed or SP credentials are missing, try API key only authentication
+    if not AZURE_OPENAI_ENABLED:
+        try:
+            app.logger.info("=" * 60)
+            app.logger.info("Initializing Azure OpenAI with API Key authentication only")
+            app.logger.info("=" * 60)
+            app.logger.info(f"  - Endpoint: {AZURE_OPENAI_ENDPOINT}")
+            app.logger.info(f"  - Deployment: {AZURE_OPENAI_DEPLOYMENT_NAME}")
+            app.logger.info(f"  - API Version: {AZURE_OPENAI_API_VERSION}")
+            app.logger.info(f"  - API Key: {'*' * 30}{AZURE_OPENAI_API_KEY[-4:]}")
+            
+            AZURE_OPENAI_ENABLED = True
+            app.logger.info("✓ Azure OpenAI client configuration ready (API Key mode)")
+            app.logger.info("=" * 60)
+            app.logger.info("Azure OpenAI integration ENABLED - API Key authentication mode")
+            app.logger.info("=" * 60)
+            
+        except Exception as e:
+            app.logger.error("✗ Failed to initialize Azure OpenAI with API Key authentication")
+            app.logger.error(f"  - Error: {str(e)}")
+            app.logger.error(f"  - Error type: {type(e).__name__}")
+            app.logger.error("Query generation feature will be disabled")
+            AZURE_OPENAI_ENABLED = False
 
 def create_new_openai_client():
-    """Create a new OpenAI client with fresh token"""
+    """Create a new Azure OpenAI client with fresh token - following LROT_AZURE.py pattern"""
     if not AZURE_OPENAI_ENABLED:
         return None
     
     try:
-        # Get fresh token
-        token_response = azure_credential.get_token("https://cognitiveservices.azure.com/.default")
+        app.logger.info("Creating new Azure OpenAI client with fresh token...")
         
-        # Create new client with fresh token
-        client = AzureOpenAI(
-            azure_endpoint=AZURE_OPENAI_ENDPOINT,
-            api_key=AZURE_OPENAI_API_KEY,
-            api_version=AZURE_OPENAI_API_VERSION,
-            default_headers={
-                "Authorization": f"Bearer {token_response.token}",
-                "x-ms-useragent": AZURE_USER_ID
-            }
-        )
+        # Get fresh token - exactly like LROT_AZURE.py does
+        if azure_credential:
+            # Azure AD authentication path
+            token_response = azure_credential.get_token("https://cognitiveservices.azure.com/.default")
+            access_token = token_response.token
+            
+            app.logger.info(f"✓ Fresh token obtained")
+            app.logger.info(f"  - Token preview: {access_token[:20]}...{access_token[-20:]}")
+            
+            # Create new client with fresh token
+            client = AzureOpenAI(
+                azure_endpoint=AZURE_OPENAI_ENDPOINT,
+                api_key=AZURE_OPENAI_API_KEY,
+                api_version=AZURE_OPENAI_API_VERSION,
+                default_headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "x-ms-useragent": AZURE_USER_ID
+                }
+            )
+        else:
+            # API key only path
+            app.logger.info("Creating client with API key only")
+            client = AzureOpenAI(
+                azure_endpoint=AZURE_OPENAI_ENDPOINT,
+                api_key=AZURE_OPENAI_API_KEY,
+                api_version=AZURE_OPENAI_API_VERSION,
+                default_headers={"x-ms-useragent": AZURE_USER_ID}
+            )
+        
+        app.logger.info("✓ New Azure OpenAI client created successfully")
         return client
+        
     except Exception as e:
-        app.logger.error(f"Failed to create OpenAI client: {str(e)}")
-        return None
+        app.logger.error(f"✗ Failed to create new Azure OpenAI client: {str(e)}")
+        app.logger.error(f"  - Error type: {type(e).__name__}")
+        raise
 
 # Parquet to Snowflake type mapping
 PARQUET_TO_SNOWFLAKE_TYPE = {
@@ -466,6 +558,56 @@ def download_file():
         app.logger.error(f"Error downloading file: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
+@app.route(f'{URL_PREFIX}/test-azure-openai', methods=['GET'])
+def test_azure_openai():
+    """Test Azure OpenAI connectivity"""
+    app.logger.info("Azure OpenAI test endpoint called")
+    
+    if not AZURE_OPENAI_ENABLED:
+        return jsonify({
+            'status': 'error',
+            'message': 'Azure OpenAI is not configured',
+            'timestamp': datetime.now().isoformat()
+        }), 503
+    
+    try:
+        # Create new client with fresh token
+        openai_client = create_new_openai_client()
+        if not openai_client:
+            raise Exception("Failed to create OpenAI client")
+        
+        # Make a simple test call
+        app.logger.info("Making test API call to Azure OpenAI...")
+        completion = openai_client.chat.completions.create(
+            model=AZURE_OPENAI_DEPLOYMENT_NAME,
+            messages=[
+                {"role": "user", "content": "Say 'Azure OpenAI is working!' in exactly 5 words."}
+            ],
+            temperature=0,
+            max_tokens=20,
+            timeout=10
+        )
+        
+        response_text = completion.choices[0].message.content
+        app.logger.info(f"✓ Test successful! Response: {response_text}")
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Azure OpenAI connection verified',
+            'response': response_text,
+            'model': completion.model,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        app.logger.error(f"✗ Test failed: {str(e)}", exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'message': f'Azure OpenAI test failed: {str(e)}',
+            'error_type': type(e).__name__,
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
 @app.route(f'{URL_PREFIX}/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
@@ -592,37 +734,75 @@ LIMIT 1000;
 Generate only the SQL query, no explanations.
 """
         
-        # Call OpenAI
-        try:
-            openai_client = create_new_openai_client()
-            if not openai_client:
-                return jsonify({"error": "Failed to create OpenAI client"}), 500
-            
-            app.logger.info(f"Calling Azure OpenAI for query generation")
-            
-            response = openai_client.chat.completions.create(
-                model=AZURE_OPENAI_DEPLOYMENT_NAME,
-                messages=[
-                    {"role": "system", "content": "You are a Snowflake SQL expert. Generate only SQL queries, no explanations."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                max_tokens=2000
-            )
-            
-            generated_query = response.choices[0].message.content.strip()
-            app.logger.info("Successfully generated Snowflake query")
-            
-            return jsonify({
-                'query': generated_query,
-                'schema': schema_info,
-                'stage_path': full_stage_path,
-                'file_name': file_path.split('/')[-1]
-            })
-            
-        except Exception as e:
-            app.logger.error(f"Error calling OpenAI: {str(e)}", exc_info=True)
-            return jsonify({"error": f"Failed to generate query: {str(e)}"}), 500
+        # Call OpenAI with retry logic
+        max_retries = 3
+        retry_delay = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                # Create new client for each attempt (fresh token)
+                openai_client = create_new_openai_client()
+                if not openai_client:
+                    raise Exception("Failed to create OpenAI client")
+                
+                # Log the actual API call details
+                app.logger.info("Making chat.completions.create call:")
+                app.logger.info(f"  - Model: {AZURE_OPENAI_DEPLOYMENT_NAME}")
+                app.logger.info(f"  - Prompt length: {len(prompt)} characters")
+                app.logger.info(f"  - Temperature: 0.1")
+                app.logger.info(f"  - Max tokens: 2000")
+                app.logger.info(f"  - Attempt: {attempt + 1}/{max_retries}")
+                
+                response = openai_client.chat.completions.create(
+                    model=AZURE_OPENAI_DEPLOYMENT_NAME,
+                    messages=[
+                        {"role": "system", "content": "You are a Snowflake SQL expert. Generate only SQL queries, no explanations."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.1,
+                    max_tokens=2000,
+                    timeout=30
+                )
+                
+                generated_query = response.choices[0].message.content.strip()
+                app.logger.info(f"✓ Azure OpenAI query generation completed successfully")
+                app.logger.info(f"  - Response length: {len(generated_query)} characters")
+                app.logger.info(f"  - Model used: {response.model}")
+                app.logger.info(f"  - Tokens used: {response.usage.total_tokens if response.usage else 'N/A'}")
+                
+                return jsonify({
+                    'query': generated_query,
+                    'schema': schema_info,
+                    'stage_path': full_stage_path,
+                    'file_name': file_path.split('/')[-1]
+                })
+                
+            except Exception as e:
+                app.logger.error(f"✗ Azure OpenAI attempt {attempt + 1} failed")
+                app.logger.error(f"  - Error: {str(e)}")
+                app.logger.error(f"  - Error type: {type(e).__name__}")
+                
+                # Log specific error details for common issues
+                error_str = str(e).lower()
+                if 'authentication' in error_str or 'unauthorized' in error_str:
+                    app.logger.error("  - This appears to be an authentication error")
+                    app.logger.error("  - Check: API key, token, tenant ID, client ID, and permissions")
+                elif 'not found' in error_str:
+                    app.logger.error("  - This appears to be a deployment/model not found error")
+                    app.logger.error(f"  - Check: Deployment name '{AZURE_OPENAI_DEPLOYMENT_NAME}' exists in your Azure OpenAI resource")
+                elif 'timeout' in error_str:
+                    app.logger.error("  - This appears to be a timeout error")
+                    app.logger.error("  - The API call took too long to respond")
+                
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (attempt + 1)
+                    app.logger.info(f"  - Waiting {wait_time} seconds before retry...")
+                    import time
+                    time.sleep(wait_time)
+                else:
+                    app.logger.error(f"✗ All {max_retries} attempts failed")
+                    app.logger.error("Full error details:", exc_info=True)
+                    return jsonify({"error": f"Failed to generate query after {max_retries} attempts: {str(e)}"}), 500
             
     except Exception as e:
         app.logger.error(f"Error in generate_snowflake_query: {str(e)}", exc_info=True)
