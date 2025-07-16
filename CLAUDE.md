@@ -76,6 +76,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
      - Pagination for large directories
    - **Reused Components**: LogViewer from EMR service
    - **Added to AWS-XCESS**: New cyan-colored tile
+   - **Backend Build Process**:
+     - Fixed Makefile to match other services' pattern
+     - Uses Poetry for dependency management
+     - Generates setup.py dynamically
+     - Creates wheel package for Docker deployment
+   - **Fixed Issues**:
+     - Python version constraint changed from ^3.7 to ^3.9
+     - boto3 version aligned with EMR backend (1.26.84)
+     - Changed from setuptools to Poetry pyproject.toml format
 
 ### Previous Session Work (2025-07-14)
 
@@ -134,6 +143,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | SSM | `/ssm-api/*` | `/parameters/*` | 3700 | 8080 |
 | S3 Data | `/s3data-api/*` | `/s3data/*` | 3700 | 8080 |
 | EMR Serverless | `/emr-serverless-api/*` | `/emr-serverless/*` | 3700 | 8080 |
+
+**Health Check Endpoints**:
+- EMR Serverless Backend: `/emr-serverless-api/health`
+- EMR Serverless Frontend: `/health`
 
 ### Known Issues and Solutions
 
@@ -207,6 +220,23 @@ To continue work, reference:
 - AWS-XCESS portal at `/` provides unified access to all services
 - Test Azure OpenAI with GET /api/test-azure-openai endpoint
 - All services follow similar patterns - use S3 Data as latest template
+
+### Session Summary (2025-07-16 - Continued)
+1. **Created EMR Serverless Log Viewer service**:
+   - Complete backend and frontend implementation
+   - Browse and view EMR Serverless logs from S3
+   - Integrated with AWS-XCESS portal
+   
+2. **Fixed build process issues**:
+   - Aligned Makefile with other services (Poetry integration)
+   - Fixed Python version constraint (^3.7 → ^3.9)
+   - Updated boto3 to battle-tested version (1.26.84)
+   - Changed from setuptools to Poetry pyproject.toml format
+   
+3. **ALB Routing Setup**:
+   - Backend: `/emr-serverless-api/*` → port 3700
+   - Frontend: `/emr-serverless/*` → port 8080
+   - Health checks configured for both services
 
 ## Project Overview
 
