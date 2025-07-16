@@ -1,45 +1,45 @@
-FROM artifactory.jpmchase.net/dxhub-docker/python:3.11-slim
+# Dockerfile
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV LOG_LEVEL=INFO
-ENV AWS_REGION=us-east-1
-ENV USE_IAM_ROLE=true
-ENV URL_PREFIX=/emr-serverless-api
+# Use the specified base image
+FROM jetae-publish.prod.aws.jpmchase.net/container-base/managedbaseimages/python:3.13.3-stable
 
-# Create app directory
+# URL to get source code for building the image (string)
+LABEL org.opencontainers.image.source="https://${REPO_HOSTNAME}/projects/${PROJECT}/repos/${REPO}/browse?at=${COMMIT_HASH}"
+
+# Source control revision identifier for the packaged software. Hash of the commit for this
+LABEL org.opencontainers.image.revision="${COMMIT_HASH}"
+
+# Human-readable title of the image (string)
+LABEL org.opencontainers.image.title="emr-serverless-viewer"
+
+# Add Application name and port to ENV
+ENV APP_NAME="emr-serverless-viewer"
+ENV PORT="3700"
+ENV LOG_LEVEL="INFO"
+ENV USE_IAM_ROLE="true"
+ENV AWS_REGION="us-east-1"
+ENV URL_PREFIX="/emr-serverless-api"
+
+# Set the working directory
 WORKDIR /app
-
-# Copy application files
-COPY pyproject.toml requirements.txt ./
-COPY app.py __init__.py ./
-COPY Makefile ./
-
-# Create non-root user
-RUN useradd -m -u 1000 jpmcnobody && \
-    chown -R jpmcnobody:jpmcnobody /app
-
-# Install dependencies and build wheel
-RUN pip install --upgrade pip setuptools wheel build && \
-    pip install -r requirements.txt && \
-    python -m build
-
-# Install the built wheel and waitress
-RUN chown -R jpmcnobody:jpmcnobody /app/ \
-    && pip install --no-cache-dir /app/dist/*.whl waitress toml
-
-# Switch to non-root user
-USER jpmcnobody
 
 # Create logs directory
 RUN mkdir -p /app/logs
 
-# Expose port
+# Install and run the app
+COPY dist /app/dist
+RUN chown -R jpmcnobody:jpmcnobody /app/ \
+    && pip install /app/dist/*.whl waitress toml
+
+# Switch to non-root user
+USER jpmcnobody
+
+# Expose the application port
 EXPOSE 3700
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=20s --start-period=120s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:3700/health').raise_for_status()" || exit 1
 
-# Run the application
+# Command to run the application
 CMD ["waitress-serve", "--host=0.0.0.0", "--port=3700", "app:app"]

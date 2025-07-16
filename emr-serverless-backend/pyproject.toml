@@ -3,7 +3,7 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "emr-serverless-backend"
+name = "emr-serverless-viewer"
 version = "0.1.0"
 dependencies = [
     "Flask==2.2.3",
