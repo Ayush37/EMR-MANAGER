@@ -14,6 +14,8 @@ import pyarrow.compute as pc
 from io import BytesIO
 import re
 import csv
+from openai import AzureOpenAI
+from azure.identity import ClientCertificateCredential
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -84,6 +86,102 @@ S3_BUCKETS = {
     }
 }
 
+# Azure OpenAI Configuration
+AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT', '')
+AZURE_OPENAI_API_KEY = os.getenv('AZURE_OPENAI_API_KEY', '')
+AZURE_OPENAI_API_VERSION = os.getenv('AZURE_OPENAI_API_VERSION', '2024-02-15-preview')
+AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', '')
+AZURE_TENANT_ID = os.getenv('AZURE_TENANT_ID', '')
+AZURE_SPN_CLIENT_ID = os.getenv('AZURE_SPN_CLIENT_ID', '')
+AZURE_USER_ID = os.getenv('AZURE_USER_ID', 'emr-manager')
+
+# Azure OpenAI client initialization
+azure_credential = None
+AZURE_OPENAI_ENABLED = False
+
+# Check for required Azure OpenAI configuration
+openai_missing = []
+if not AZURE_OPENAI_ENDPOINT:
+    openai_missing.append("AZURE_OPENAI_ENDPOINT")
+if not AZURE_OPENAI_API_KEY:
+    openai_missing.append("AZURE_OPENAI_API_KEY")
+if not AZURE_OPENAI_DEPLOYMENT_NAME:
+    openai_missing.append("AZURE_OPENAI_DEPLOYMENT_NAME")
+if not AZURE_TENANT_ID:
+    openai_missing.append("AZURE_TENANT_ID")
+if not AZURE_SPN_CLIENT_ID:
+    openai_missing.append("AZURE_SPN_CLIENT_ID")
+
+pem_path = '/app/azure_cert.pem'
+if not os.path.exists(pem_path):
+    openai_missing.append("azure_cert.pem file")
+
+if openai_missing:
+    app.logger.warning(f"Azure OpenAI not configured. Missing: {', '.join(openai_missing)}")
+    app.logger.warning("Query generation feature will be disabled")
+    AZURE_OPENAI_ENABLED = False
+else:
+    try:
+        # Initialize Azure credential
+        azure_credential = ClientCertificateCredential(
+            tenant_id=AZURE_TENANT_ID,
+            client_id=AZURE_SPN_CLIENT_ID,
+            certificate_path=pem_path
+        )
+        app.logger.info("Azure credential initialized successfully")
+        AZURE_OPENAI_ENABLED = True
+    except Exception as e:
+        app.logger.error(f"Failed to initialize Azure credential: {str(e)}")
+        AZURE_OPENAI_ENABLED = False
+
+def create_new_openai_client():
+    """Create a new OpenAI client with fresh token"""
+    if not AZURE_OPENAI_ENABLED:
+        return None
+    
+    try:
+        # Get fresh token
+        token_response = azure_credential.get_token("https://cognitiveservices.azure.com/.default")
+        
+        # Create new client with fresh token
+        client = AzureOpenAI(
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+            api_key=AZURE_OPENAI_API_KEY,
+            api_version=AZURE_OPENAI_API_VERSION,
+            default_headers={
+                "Authorization": f"Bearer {token_response.token}",
+                "x-ms-useragent": AZURE_USER_ID
+            }
+        )
+        return client
+    except Exception as e:
+        app.logger.error(f"Failed to create OpenAI client: {str(e)}")
+        return None
+
+# Parquet to Snowflake type mapping
+PARQUET_TO_SNOWFLAKE_TYPE = {
+    'int8': 'NUMBER(3, 0)',
+    'int16': 'NUMBER(5, 0)',
+    'int32': 'NUMBER(10, 0)',
+    'int64': 'NUMBER(19, 0)',
+    'uint8': 'NUMBER(3, 0)',
+    'uint16': 'NUMBER(5, 0)',
+    'uint32': 'NUMBER(10, 0)',
+    'uint64': 'NUMBER(20, 0)',
+    'float': 'FLOAT',
+    'double': 'DOUBLE',
+    'bool': 'BOOLEAN',
+    'string': 'TEXT',
+    'timestamp[ns]': 'TIMESTAMP_NTZ',
+    'timestamp[us]': 'TIMESTAMP_NTZ',
+    'timestamp[ms]': 'TIMESTAMP_NTZ',
+    'date32[day]': 'DATE',
+    'date64[ms]': 'DATE',
+    'decimal128': 'NUMBER(38, 0)',
+    'binary': 'BINARY',
+    'large_string': 'TEXT'
+}
+
 # Request logging middleware
 @app.before_request
 def log_request_info():
@@ -117,6 +215,7 @@ def index():
             'list': f'{URL_PREFIX}/list',
             'preview': f'{URL_PREFIX}/preview',
             'download': f'{URL_PREFIX}/download',
+            'generate-query': f'{URL_PREFIX}/generate-query',
             'health': f'{URL_PREFIX}/health'
         },
         'timestamp': datetime.now().isoformat()
@@ -386,6 +485,148 @@ def health_check_root():
         'service': 's3data-backend',
         'timestamp': datetime.now().isoformat()
     })
+
+@app.route(f'{URL_PREFIX}/generate-query', methods=['POST'])
+def generate_snowflake_query():
+    """Generate Snowflake query from natural language"""
+    try:
+        if not AZURE_OPENAI_ENABLED:
+            return jsonify({
+                "error": "Query generation feature is not available. Azure OpenAI is not configured."
+            }), 503
+        
+        # Get request data
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Request body required"}), 400
+        
+        environment = data.get('environment', 'uat1')
+        bucket_type = data.get('bucket_type', 'REFINED')
+        file_path = data.get('file_path', '')
+        natural_language_query = data.get('query', '')
+        
+        if not file_path:
+            return jsonify({"error": "File path required"}), 400
+        if not natural_language_query:
+            return jsonify({"error": "Query text required"}), 400
+        
+        # Validate environment and bucket type
+        if environment not in S3_BUCKETS:
+            return jsonify({"error": "Invalid environment"}), 400
+        if bucket_type not in S3_BUCKETS[environment]:
+            return jsonify({"error": "Invalid bucket type"}), 400
+        
+        bucket_name = S3_BUCKETS[environment][bucket_type]
+        app.logger.info(f"Generating Snowflake query for: s3://{bucket_name}/{file_path}")
+        
+        # Get parquet schema
+        try:
+            response = s3.get_object(Bucket=bucket_name, Key=file_path)
+            parquet_data = response['Body'].read()
+            parquet_file = pq.ParquetFile(BytesIO(parquet_data))
+            schema = parquet_file.schema_arrow
+        except Exception as e:
+            app.logger.error(f"Error reading parquet file: {str(e)}")
+            return jsonify({"error": f"Failed to read parquet file: {str(e)}"}), 500
+        
+        # Build schema info for OpenAI
+        schema_info = []
+        for field in schema:
+            parquet_type = str(field.type)
+            snowflake_type = PARQUET_TO_SNOWFLAKE_TYPE.get(parquet_type, 'VARIANT')
+            schema_info.append({
+                'column_name': field.name,
+                'parquet_type': parquet_type,
+                'snowflake_type': snowflake_type
+            })
+        
+        # Build Snowflake stage path
+        # Map bucket names to Snowflake stage aliases
+        stage_mapping = {
+            'uat1': {
+                'REFINED': '@PROD_107923_DB.LRI_BASE.CADSS3_LRSS_PROD_REFINED',
+                'TRUSTED': '@PROD_107923_DB.LRI_BASE.CADSS3_LRSS_PROD_TRUSTED'
+            },
+            'uat2': {
+                'REFINED': '@PROD_107923_DB.LRI_BASE.CADSS3_LRSS_UAT2_REFINED',
+                'TRUSTED': '@PROD_107923_DB.LRI_BASE.CADSS3_LRSS_UAT2_TRUSTED'
+            },
+            'uat3': {
+                'REFINED': '@PROD_107923_DB.LRI_BASE.CADSS3_LRSS_UAT3_REFINED',
+                'TRUSTED': '@PROD_107923_DB.LRI_BASE.CADSS3_LRSS_UAT3_TRUSTED'
+            }
+        }
+        
+        stage_alias = stage_mapping.get(environment, {}).get(bucket_type, '@YOUR_STAGE')
+        full_stage_path = f"{stage_alias}/{file_path}"
+        
+        # Prepare prompt for OpenAI
+        prompt = f"""
+You are a Snowflake SQL expert. Generate a Snowflake query to read from a parquet file based on the user's natural language request.
+
+Parquet File Schema:
+{json.dumps(schema_info, indent=2)}
+
+User Request: {natural_language_query}
+
+Important Instructions:
+1. Use the Snowflake parquet syntax: $1:column_name::DATA_TYPE
+2. The FROM clause should be: {full_stage_path} (FILE_FORMAT => 'LRI_BASE.FILE_FORMAT_PARQUET') t
+3. Include column aliases using AS to match the original column names
+4. Always add LIMIT 1000 at the end unless the user specifies a different limit
+5. If the user asks for all columns, select all columns from the schema
+6. Map the data types according to the schema provided
+7. Handle column names with special characters by wrapping them in double quotes if needed
+
+Example format:
+SELECT
+    $1:column1::TEXT AS column1,
+    $1:column2::NUMBER(38, 0) AS column2
+FROM
+{full_stage_path}
+    (FILE_FORMAT => 'LRI_BASE.FILE_FORMAT_PARQUET') t
+WHERE
+    condition
+LIMIT 1000;
+
+Generate only the SQL query, no explanations.
+"""
+        
+        # Call OpenAI
+        try:
+            openai_client = create_new_openai_client()
+            if not openai_client:
+                return jsonify({"error": "Failed to create OpenAI client"}), 500
+            
+            app.logger.info(f"Calling Azure OpenAI for query generation")
+            
+            response = openai_client.chat.completions.create(
+                model=AZURE_OPENAI_DEPLOYMENT_NAME,
+                messages=[
+                    {"role": "system", "content": "You are a Snowflake SQL expert. Generate only SQL queries, no explanations."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,
+                max_tokens=2000
+            )
+            
+            generated_query = response.choices[0].message.content.strip()
+            app.logger.info("Successfully generated Snowflake query")
+            
+            return jsonify({
+                'query': generated_query,
+                'schema': schema_info,
+                'stage_path': full_stage_path,
+                'file_name': file_path.split('/')[-1]
+            })
+            
+        except Exception as e:
+            app.logger.error(f"Error calling OpenAI: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Failed to generate query: {str(e)}"}), 500
+            
+    except Exception as e:
+        app.logger.error(f"Error in generate_snowflake_query: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
 
 @app.errorhandler(415)
 def handle_415_error(e):

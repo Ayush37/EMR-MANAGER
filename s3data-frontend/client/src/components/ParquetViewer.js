@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import s3DataService from '../services/s3DataService';
 import LoadingSpinner from './LoadingSpinner';
+import QueryGeneratorModal from './QueryGeneratorModal';
 import { formatFileSize } from '../utils/formatters';
 
 const ParquetViewer = ({ file, environment, bucketType }) => {
@@ -10,6 +11,7 @@ const ParquetViewer = ({ file, environment, bucketType }) => {
   const [data, setData] = useState(null);
   const [metadata, setMetadata] = useState(null);
   const [downloading, setDownloading] = useState(false);
+  const [showQueryGenerator, setShowQueryGenerator] = useState(false);
 
   useEffect(() => {
     if (file) {
@@ -146,6 +148,18 @@ const ParquetViewer = ({ file, environment, bucketType }) => {
               </svg>
               CSV
             </button>
+            <button
+              onClick={() => setShowQueryGenerator(true)}
+              className="inline-flex items-center px-3 py-1 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+            >
+              <svg className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                  d="M3 7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                  d="M8 11h8m-4-4v8" />
+              </svg>
+              Snowflake
+            </button>
           </div>
         </div>
       </div>
@@ -184,6 +198,16 @@ const ParquetViewer = ({ file, environment, bucketType }) => {
           </tbody>
         </table>
       </div>
+      
+      {/* Query Generator Modal */}
+      {showQueryGenerator && (
+        <QueryGeneratorModal
+          file={file}
+          environment={environment}
+          bucketType={bucketType}
+          onClose={() => setShowQueryGenerator(false)}
+        />
+      )}
     </div>
   );
 };

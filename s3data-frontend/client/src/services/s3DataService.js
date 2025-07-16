@@ -93,6 +93,27 @@ class S3DataService {
       throw error;
     }
   }
+
+  async generateSnowflakeQuery({ environment, bucketType, filePath, query }) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/generate-query`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          environment,
+          bucket_type: bucketType,
+          file_path: filePath,
+          query
+        })
+      });
+      return this.handleResponse(response);
+    } catch (error) {
+      console.error('Error generating Snowflake query:', error);
+      throw error;
+    }
+  }
 }
 
 export default new S3DataService();
