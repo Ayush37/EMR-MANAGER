@@ -179,6 +179,7 @@ else:
     # First try Azure AD authentication if Service Principal credentials are available
     if not sp_missing:
         try:
+            global azure_credential
             app.logger.info("Attempting Azure AD + API Key hybrid authentication...")
             
             # Initialize Service Principal credential for Azure AD token
@@ -187,7 +188,6 @@ else:
             app.logger.info(f"  - Client ID: {AZURE_SPN_CLIENT_ID}")
             app.logger.info(f"  - Certificate Path: {AZURE_PEM_PATH}")
             
-            global azure_credential
             azure_credential = CertificateCredential(
                 tenant_id=AZURE_TENANT_ID,
                 client_id=AZURE_SPN_CLIENT_ID,
