@@ -1217,6 +1217,9 @@ Limit response to 150 words."""
         
         for attempt in range(max_retries):
             try:
+                # Declare global at the beginning since we might modify it
+                global azure_openai_client
+                
                 app.logger.info(f"Attempt {attempt + 1}/{max_retries} - Making Azure OpenAI API call")
                 
                 # Force a completely new token for this request
@@ -1229,7 +1232,6 @@ Limit response to 150 words."""
                 # On retry attempts, recreate the client to ensure no stale connections
                 if attempt > 0:
                     app.logger.warning(f"Recreating Azure OpenAI client for retry attempt {attempt + 1}")
-                    global azure_openai_client
                     
                     # Get fresh token for new client
                     token_response = azure_openai_client._credential.get_token(
