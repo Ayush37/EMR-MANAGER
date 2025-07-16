@@ -1,52 +1,37 @@
-# Multi-stage build for EMR Serverless frontend
+# Using Node Managed Base Image for React UI
+FROM jetae-publish.prod.aws.jpmchase.net/container-base/managedbaseimages/nodejs:18.12.1-stable AS client-build
 
-# Stage 1: Build the React app
-FROM artifactory.jpmchase.net/dxhub-docker/node:18-alpine AS build
+WORKDIR /usr/src/app
 
-WORKDIR /app
+COPY ./client/ ./client/
 
-# Copy package files
-COPY client/package*.json ./client/
-
-# Install dependencies
-WORKDIR /app/client
-RUN npm ci --only=production
-
-# Copy client source code
-COPY client/ ./
-
-# Build the React app
-RUN npm run build
-
-# Stage 2: Production server
-FROM artifactory.jpmchase.net/dxhub-docker/node:18-alpine
-
-# Create non-root user
-RUN adduser -D -u 1000 jpmcnobody
-
-WORKDIR /app
-
-# Copy server package files
-COPY server/package*.json ./server/
-
-# Install server dependencies
-WORKDIR /app/server
-RUN npm ci --only=production
-
-# Copy server code
-COPY server/ ./
-
-# Copy built React app from build stage
-COPY --from=build /app/client/build /app/client/build
-
-# Change ownership
-RUN chown -R jpmcnobody:jpmcnobody /app
-
-# Switch to non-root user
+# Access Permissions
+RUN chown -R jpmcnobody:jpmcnobody /usr/src/app
+RUN chmod 775 /usr/src/app
 USER jpmcnobody
 
-# Expose port
+# Build the react app to generate the build folder
+RUN cd client && npm install && npm run build
+
+# Using Node Managed Base Image for node server to serve the build folder from UI
+FROM jetae-publish.prod.aws.jpmchase.net/container-base/managedbaseimages/nodejs:18.12.1-stable AS server-build
+
+# Create app directory
+WORKDIR /app
+
+# Copy the UI build to the current context
+COPY --from=client-build /usr/src/app/client/build ./client/build
+
+# Copy the package to install the dependencies
+COPY ./server/package.json ./server/
+
+# Install server side dependencies/packages
+RUN cd server && npm install
+
+# Copy the server file
+COPY ./server/index.js ./server/
+
 EXPOSE 8080
 
-# Start the server
-CMD ["node", "index.js"]
+# Run the server
+CMD ["node", "./server/index.js"]
