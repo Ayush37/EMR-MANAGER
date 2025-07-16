@@ -40,7 +40,7 @@ create-pyproject: ## Create pyproject.toml file for Poetry
 	@echo "authors = [\"Your Name <your.email@example.com>\"]" >> pyproject.toml
 	@echo "" >> pyproject.toml
 	@echo "[tool.poetry.dependencies]" >> pyproject.toml
-	@echo "python = \"^3.7\"" >> pyproject.toml
+	@echo "python = \"^3.9\"" >> pyproject.toml
 	@echo "flask = \"^2.2.3\"" >> pyproject.toml
 	@echo "flask-cors = \"^4.0.0\"" >> pyproject.toml
 	@echo "boto3 = \"^1.28.57\"" >> pyproject.toml
