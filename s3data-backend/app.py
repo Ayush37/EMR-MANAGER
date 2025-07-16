@@ -15,7 +15,7 @@ from io import BytesIO
 import re
 import csv
 from openai import AzureOpenAI
-from azure.identity import ClientCertificateCredential
+from azure.identity import CertificateCredential
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -123,7 +123,7 @@ if openai_missing:
 else:
     try:
         # Initialize Azure credential
-        azure_credential = ClientCertificateCredential(
+        azure_credential = CertificateCredential(
             tenant_id=AZURE_TENANT_ID,
             client_id=AZURE_SPN_CLIENT_ID,
             certificate_path=pem_path
