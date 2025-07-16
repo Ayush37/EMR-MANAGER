@@ -42,8 +42,8 @@ create-pyproject: ## Create pyproject.toml file for Poetry
 	@echo "[tool.poetry.dependencies]" >> pyproject.toml
 	@echo "python = \"^3.9\"" >> pyproject.toml
 	@echo "flask = \"^2.2.3\"" >> pyproject.toml
-	@echo "flask-cors = \"^4.0.0\"" >> pyproject.toml
-	@echo "boto3 = \"^1.28.57\"" >> pyproject.toml
+	@echo "flask-cors = \"^3.0.10\"" >> pyproject.toml
+	@echo "boto3 = \"^1.24.0\"" >> pyproject.toml
 	@echo "python-dotenv = \"^1.0.0\"" >> pyproject.toml
 	@echo "waitress = \"^2.1.2\"" >> pyproject.toml
 	@echo "" >> pyproject.toml
@@ -82,8 +82,8 @@ setup-py: ## Create setup.py file required for building wheel
 	@echo "    include_package_data=True," >> setup.py
 	@echo "    install_requires=[" >> setup.py
 	@echo "        \"flask==2.2.3\"," >> setup.py
-	@echo "        \"flask-cors==4.0.0\"," >> setup.py
-	@echo "        \"boto3==1.28.57\"," >> setup.py
+	@echo "        \"flask-cors==3.0.10\"," >> setup.py
+	@echo "        \"boto3==1.26.84\"," >> setup.py
 	@echo "        \"python-dotenv==1.0.0\"," >> setup.py
 	@echo "        \"waitress==2.1.2\"," >> setup.py
 	@echo "        \"Werkzeug==2.3.7\"," >> setup.py
