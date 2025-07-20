@@ -8,7 +8,9 @@ const ClusterDetailsModal = ({ cluster, onClose }) => {
 
   if (!cluster) return null;
 
-  const isActiveCluster = cluster.state === 'RUNNING' || cluster.state === 'WAITING';
+  // Show View Steps button for all clusters that have a cluster ID (including TERMINATED ones)
+  // This allows users to view historical step logs even after cluster termination
+  const showViewStepsButton = cluster.clusterId !== null && cluster.clusterId !== undefined;
   
   // Calculate cluster runtime
   const startTime = cluster.timeline?.creationDateTime;
@@ -148,7 +150,7 @@ const ClusterDetailsModal = ({ cluster, onClose }) => {
 
             {/* Footer */}
             <div className="bg-gray-50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
-              {isActiveCluster && (
+              {showViewStepsButton && (
                 <button
                   type="button"
                   onClick={() => setShowStepsModal(true)}
