@@ -420,6 +420,60 @@ def get_clusters():
             ]
             app.logger.debug(f"After state filter: {len(merged_clusters)} clusters")
         
+        # Sort clusters: Active states first, then by last activity
+        active_states = ['RUNNING', 'STARTING', 'BOOTSTRAPPING', 'WAITING']
+        
+        def get_sort_key(cluster):
+            state = cluster.get('state', 'UNKNOWN')
+            # Priority for active states
+            if state in active_states:
+                state_priority = active_states.index(state)
+            else:
+                state_priority = len(active_states) + 1  # Lower priority for non-active states
+            
+            # Get last activity time - use the most recent time from timeline
+            timeline = cluster.get('timeline', {})
+            last_activity = None
+            
+            # Check timeline for the most recent activity
+            if timeline:
+                # Convert timeline values to datetime if they're strings
+                times = []
+                for key, value in timeline.items():
+                    if value:
+                        try:
+                            if isinstance(value, str):
+                                # Parse ISO format datetime
+                                dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                                times.append(dt)
+                        except:
+                            pass
+                
+                if times:
+                    last_activity = max(times)
+            
+            # If no timeline, use lastModified from config
+            if not last_activity:
+                last_modified = cluster.get('lastModified')
+                if last_modified:
+                    try:
+                        if isinstance(last_modified, str):
+                            last_activity = datetime.fromisoformat(last_modified.replace('Z', '+00:00'))
+                    except:
+                        pass
+            
+            # Default to a very old date if no activity found
+            if not last_activity:
+                last_activity = datetime(2000, 1, 1)
+            
+            # Return tuple for sorting: (state_priority, -last_activity_timestamp)
+            # Negative timestamp so more recent comes first
+            return (state_priority, -last_activity.timestamp())
+        
+        # Sort the clusters
+        merged_clusters.sort(key=get_sort_key)
+        app.logger.debug(f"Sorted {len(merged_clusters)} clusters by state and last activity")
+        
         # Apply pagination
         total_count = len(merged_clusters)
         skip = (page - 1) * limit
@@ -1394,27 +1448,26 @@ def get_cluster_configs(environment='uat1'):
         cluster_configs = []
         for param in params:
             cluster_name = param['Name'].replace(param_store_path, "")
-            # Filter out clusters with "STRESS" in their name
-            if "STRESS" not in cluster_name:
-                try:
-                    config = json.loads(param['Value'])
-                    app.logger.debug(f"Successfully parsed JSON for: {cluster_name}")
-                except json.JSONDecodeError:
-                    app.logger.warning(f"Could not parse parameter value as JSON for: {cluster_name}")
-                    config = {"rawValue": param['Value']}
+            # No longer filtering out STRESS clusters - show all clusters
+            try:
+                config = json.loads(param['Value'])
+                app.logger.debug(f"Successfully parsed JSON for: {cluster_name}")
+            except json.JSONDecodeError:
+                app.logger.warning(f"Could not parse parameter value as JSON for: {cluster_name}")
+                config = {"rawValue": param['Value']}
 
-                # Convert datetime objects to ISO format strings for JSON serialization
-                last_modified = param.get('LastModifiedDate')
-                if hasattr(last_modified, 'isoformat'):
-                    last_modified = last_modified.isoformat()
+            # Convert datetime objects to ISO format strings for JSON serialization
+            last_modified = param.get('LastModifiedDate')
+            if hasattr(last_modified, 'isoformat'):
+                last_modified = last_modified.isoformat()
 
-                cluster_configs.append({
-                    "name": cluster_name,
-                    "config": config,
-                    "parameterName": param['Name'],
-                    "lastModified": last_modified
-                })
-                app.logger.debug(f"Added cluster config: {cluster_name}")
+            cluster_configs.append({
+                "name": cluster_name,
+                "config": config,
+                "parameterName": param['Name'],
+                "lastModified": last_modified
+            })
+            app.logger.debug(f"Added cluster config: {cluster_name}")
 
         app.logger.debug(f"Processed {len(cluster_configs)} cluster configurations")
         return cluster_configs

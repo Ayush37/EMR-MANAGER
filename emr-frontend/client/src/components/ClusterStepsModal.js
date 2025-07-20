@@ -198,7 +198,7 @@ const ClusterStepsModal = ({ cluster, onClose }) => {
                                       >
                                         Details
                                       </button>
-                                      {['COMPLETED', 'FAILED', 'RUNNING'].includes(step.state) && (
+                                      {['COMPLETED', 'FAILED', 'RUNNING', 'CANCELLED', 'INTERRUPTED'].includes(step.state) && (
                                         <button
                                           onClick={() => handleViewLogs(step)}
                                           className="text-purple-600 hover:text-purple-900 mr-3"
