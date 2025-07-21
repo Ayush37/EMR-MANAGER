@@ -23,6 +23,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [iframeLoading, setIframeLoading] = useState(false);
+  const [userInfo, setUserInfo] = useState(null);
 
   const services = [
     {
@@ -88,6 +89,31 @@ function App() {
   ];
 
   useEffect(() => {
+    // Parse user info from cookie
+    const getCookieValue = (name) => {
+      const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+      return match ? match[2] : null;
+    };
+
+    const parseUserInfo = () => {
+      try {
+        const authCookie = getCookieValue('dxd-ct-auth');
+        if (authCookie) {
+          // Decode URL-encoded cookie value
+          const decodedCookie = decodeURIComponent(authCookie);
+          const userData = JSON.parse(decodedCookie);
+          setUserInfo(userData);
+        } else {
+          setUserInfo(null);
+        }
+      } catch (error) {
+        console.error('Error parsing user info cookie:', error);
+        setUserInfo(null);
+      }
+    };
+
+    parseUserInfo();
+
     // Handle browser back/forward
     const handlePopState = () => {
       const path = window.location.pathname;
@@ -240,6 +266,9 @@ function App() {
               <div className="flex items-center space-x-4">
                 <span className="text-sm text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-3 py-1 rounded-full">
                   UAT Environment
+                </span>
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  {userInfo ? `Hello, ${userInfo.firstName || 'User'}` : 'Not Identified'}
                 </span>
               </div>
             </div>
