@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { 
   ServerIcon, 
@@ -15,7 +15,8 @@ import {
   Squares2X2Icon,
   CpuChipIcon,
   CurrencyDollarIcon,
-  CommandLineIcon
+  CommandLineIcon,
+  ChevronDownIcon
 } from '@heroicons/react/24/outline';
 
 function App() {
@@ -24,6 +25,8 @@ function App() {
   const [darkMode, setDarkMode] = useState(false);
   const [iframeLoading, setIframeLoading] = useState(false);
   const [userInfo, setUserInfo] = useState(null);
+  const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const dropdownRef = useRef(null);
 
   const services = [
     {
@@ -139,6 +142,23 @@ function App() {
 
     return () => window.removeEventListener('popstate', handlePopState);
   }, [darkMode]);
+
+  // Handle clicking outside dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setShowUserDropdown(false);
+      }
+    };
+
+    if (showUserDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showUserDropdown]);
 
   const handleServiceChange = (serviceId) => {
     const service = services.find(s => s.id === serviceId);
@@ -267,9 +287,44 @@ function App() {
                 <span className="text-sm text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-3 py-1 rounded-full">
                   UAT Environment
                 </span>
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  {userInfo ? `Hello, ${userInfo.firstName || 'User'}` : 'Not Identified'}
-                </span>
+                <div className="relative" ref={dropdownRef}>
+                  <button
+                    onClick={() => setShowUserDropdown(!showUserDropdown)}
+                    className="flex items-center space-x-1 text-sm text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+                  >
+                    <span>{userInfo ? `Hello, ${userInfo.firstName || 'User'}` : 'Not Identified'}</span>
+                    {userInfo && <ChevronDownIcon className={`h-4 w-4 transition-transform ${showUserDropdown ? 'rotate-180' : ''}`} />}
+                  </button>
+                  
+                  {/* User Dropdown */}
+                  {showUserDropdown && userInfo && (
+                    <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-2 z-50">
+                      <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {userInfo.displayName || userInfo.firstName || 'User'}
+                        </p>
+                      </div>
+                      <div className="px-4 py-3 space-y-2">
+                        <div className="flex flex-col">
+                          <span className="text-xs text-gray-500 dark:text-gray-400">Employee ID</span>
+                          <span className="text-sm text-gray-900 dark:text-white">{userInfo.sid || 'N/A'}</span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-xs text-gray-500 dark:text-gray-400">Email</span>
+                          <span className="text-sm text-gray-900 dark:text-white">{userInfo.email || 'N/A'}</span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-xs text-gray-500 dark:text-gray-400">Department</span>
+                          <span className="text-sm text-gray-900 dark:text-white">{userInfo.department || 'N/A'}</span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-xs text-gray-500 dark:text-gray-400">Country</span>
+                          <span className="text-sm text-gray-900 dark:text-white">{userInfo.countryCode || 'N/A'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
