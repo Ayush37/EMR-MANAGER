@@ -153,7 +153,16 @@ const ClusterDetailsModal = ({ cluster, onClose }) => {
               {showViewStepsButton && (
                 <button
                   type="button"
-                  onClick={() => setShowStepsModal(true)}
+                  onClick={() => {
+                    // Update URL with cluster and environment parameters
+                    const params = new URLSearchParams(window.location.search);
+                    params.set('cluster', cluster.name);
+                    params.set('env', cluster.environment.toLowerCase());
+                    params.set('modal', 'steps');
+                    window.history.pushState({}, '', `${window.location.pathname}?${params}`);
+                    
+                    setShowStepsModal(true);
+                  }}
                   className="inline-flex w-full justify-center rounded-md bg-aws-blue px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-aws-blue-dark sm:ml-3 sm:w-auto"
                 >
                   View Steps
@@ -175,7 +184,16 @@ const ClusterDetailsModal = ({ cluster, onClose }) => {
       {showStepsModal && (
         <ClusterStepsModal
           cluster={cluster}
-          onClose={() => setShowStepsModal(false)}
+          onClose={() => {
+            setShowStepsModal(false);
+            // Clean up URL parameters
+            const params = new URLSearchParams(window.location.search);
+            params.delete('cluster');
+            params.delete('env');
+            params.delete('modal');
+            const newUrl = params.toString() ? `${window.location.pathname}?${params}` : window.location.pathname;
+            window.history.replaceState({}, '', newUrl);
+          }}
         />
       )}
     </>

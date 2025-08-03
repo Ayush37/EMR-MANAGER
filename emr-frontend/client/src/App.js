@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Toaster, toast } from 'react-hot-toast';
 import ClusterTable from './components/ClusterTable';
 import ClusterDetailsModal from './components/ClusterDetailsModal';
+import ClusterStepsModal from './components/ClusterStepsModal';
 import SearchBar from './components/SearchBar';
 import EnvironmentFilter from './components/EnvironmentFilter';
 import LoadingSpinner from './components/LoadingSpinner';
@@ -17,6 +18,8 @@ function App() {
   const [selectedStates, setSelectedStates] = useState([]);
   const [selectedCluster, setSelectedCluster] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showStepsModal, setShowStepsModal] = useState(false);
+  const [loadingClusterForSteps, setLoadingClusterForSteps] = useState(false);
   
   // Environment filter with localStorage persistence
   const [environment, setEnvironment] = useState(() => {
@@ -68,6 +71,58 @@ function App() {
   useEffect(() => {
     localStorage.setItem('emr-environment', environment);
   }, [environment]);
+
+  // Handle URL parameters for direct access to steps modal
+  useEffect(() => {
+    const checkUrlParams = () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const clusterName = urlParams.get('cluster');
+      const envParam = urlParams.get('env');
+      const modal = urlParams.get('modal');
+
+      if (clusterName && envParam && modal === 'steps') {
+        // Load cluster data and open steps modal
+        if (!showStepsModal) {
+          handleUrlBasedStepsModal(clusterName, envParam);
+        }
+      } else {
+        // URL params removed, close modal if open
+        if (showStepsModal) {
+          setShowStepsModal(false);
+          setSelectedCluster(null);
+        }
+      }
+    };
+
+    checkUrlParams();
+
+    // Listen for browser back/forward
+    const handlePopState = () => {
+      checkUrlParams();
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [showStepsModal]); // Re-run when modal state changes
+
+  const handleUrlBasedStepsModal = async (clusterName, env) => {
+    try {
+      setLoadingClusterForSteps(true);
+      // Fetch cluster details
+      const clusterData = await emrService.getCluster(clusterName, env);
+      if (clusterData) {
+        setSelectedCluster(clusterData);
+        setShowStepsModal(true);
+      } else {
+        toast.error(`Cluster ${clusterName} not found in ${env}`);
+      }
+    } catch (err) {
+      console.error('Error loading cluster for steps modal:', err);
+      toast.error(`Failed to load cluster ${clusterName}`);
+    } finally {
+      setLoadingClusterForSteps(false);
+    }
+  };
 
   // All filtering is done by backend now
   const filteredClusters = clusters;
@@ -232,6 +287,34 @@ function App() {
             setSelectedCluster(null);
           }}
         />
+      )}
+
+      {/* Direct Steps Modal (accessed via URL) */}
+      {showStepsModal && selectedCluster && (
+        <ClusterStepsModal
+          cluster={selectedCluster}
+          onClose={() => {
+            setShowStepsModal(false);
+            setSelectedCluster(null);
+            // Clean up URL parameters
+            const params = new URLSearchParams(window.location.search);
+            params.delete('cluster');
+            params.delete('env');
+            params.delete('modal');
+            const newUrl = params.toString() ? `${window.location.pathname}?${params}` : window.location.pathname;
+            window.history.replaceState({}, '', newUrl);
+          }}
+        />
+      )}
+
+      {/* Loading spinner for URL-based cluster loading */}
+      {loadingClusterForSteps && (
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 shadow-xl">
+            <LoadingSpinner />
+            <p className="mt-4 text-gray-600">Loading cluster information...</p>
+          </div>
+        </div>
       )}
     </div>
   );

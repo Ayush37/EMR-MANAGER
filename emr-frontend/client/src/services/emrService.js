@@ -53,15 +53,22 @@ class EMRService {
     }
   }
 
-  async getCluster(name) {
+  async getCluster(name, environment) {
     try {
-      const response = await fetch(`${API_BASE_URL}/clusters/${encodeURIComponent(name)}`, {
+      const response = await fetch(getApiUrl(`/clusters/${encodeURIComponent(name)}`), {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
         },
       });
-      return this.handleResponse(response);
+      const cluster = await this.handleResponse(response);
+      
+      // Verify cluster belongs to the requested environment
+      if (cluster && cluster.environment && cluster.environment.toLowerCase() === environment.toLowerCase()) {
+        return cluster;
+      } else {
+        throw new Error(`Cluster ${name} not found in environment ${environment}`);
+      }
     } catch (error) {
       console.error('Error getting cluster:', error);
       throw error;
