@@ -13,14 +13,25 @@ class SSMService {
 
   async listParameters(page = 1, limit = 50) {
     try {
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+      
       const response = await fetch(`${API_BASE_URL}/allparameters?page=${page}&limit=${limit}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
         },
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
       return this.handleResponse(response);
     } catch (error) {
+      if (error.name === 'AbortError') {
+        console.error('Request timeout - too many parameters');
+        throw new Error('Request timeout - the parameter list is too large. Please try with a smaller page size.');
+      }
       console.error('Error listing parameters:', error);
       throw error;
     }
@@ -30,14 +41,25 @@ class SSMService {
     try {
       // Don't encode slashes, as they're part of the path
       const encodedName = name.split('/').map(segment => encodeURIComponent(segment)).join('/');
+      
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 1 minute timeout
+      
       const response = await fetch(`${API_BASE_URL}/parameter${encodedName}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
         },
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
       return this.handleResponse(response);
     } catch (error) {
+      if (error.name === 'AbortError') {
+        throw new Error('Request timeout');
+      }
       console.error('Error getting parameter:', error);
       throw error;
     }
@@ -81,14 +103,25 @@ class SSMService {
     try {
       // Don't encode slashes, as they're part of the path
       const encodedName = name.split('/').map(segment => encodeURIComponent(segment)).join('/');
+      
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 1 minute timeout
+      
       const response = await fetch(`${API_BASE_URL}/parameter${encodedName}/history`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
         },
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
       return this.handleResponse(response);
     } catch (error) {
+      if (error.name === 'AbortError') {
+        throw new Error('Request timeout');
+      }
       console.error('Error getting parameter history:', error);
       throw error;
     }

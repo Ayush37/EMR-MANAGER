@@ -129,7 +129,7 @@ def list_parameters_by_path(path_prefix, page=1, limit=50):
             params = {
                 'Path': path_prefix,
                 'Recursive': True,
-                'MaxResults': 10
+                'MaxResults': 50  # Increased from 10 to 50 for faster loading
             }
             
             if next_token:
@@ -440,4 +440,6 @@ if __name__ == '__main__':
     else:
         from waitress import serve
         app.logger.info(f'Starting SSM Backend service with Waitress on port {port}')
-        serve(app, host='0.0.0.0', port=port)
+        # Increase timeout to 300 seconds (5 minutes) for large parameter lists
+        serve(app, host='0.0.0.0', port=port, threads=6, connection_limit=200, 
+              cleanup_interval=30, channel_timeout=300)
