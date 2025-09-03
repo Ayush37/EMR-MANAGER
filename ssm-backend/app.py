@@ -129,7 +129,7 @@ def list_parameters_by_path(path_prefix, page=1, limit=50):
             params = {
                 'Path': path_prefix,
                 'Recursive': True,
-                'MaxResults': 50  # Increased from 10 to 50 for faster loading
+                'MaxResults': 10  # AWS SSM API limit is 10 max
             }
             
             if next_token:
