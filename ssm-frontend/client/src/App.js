@@ -1,71 +1,58 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { Toaster, toast } from 'react-hot-toast';
-import ParameterTable from './components/ParameterTable';
 import ParameterEditor from './components/ParameterEditor';
 import ParameterHistory from './components/ParameterHistory';
 import ParameterDetailsModal from './components/ParameterDetailsModal';
-import SearchBar from './components/SearchBar';
 import LoadingSpinner from './components/LoadingSpinner';
 import ErrorMessage from './components/ErrorMessage';
-import Pagination from './components/Pagination';
 import ssmService from './services/ssmService';
 
 function App() {
-  const [parameters, setParameters] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [searchPath, setSearchPath] = useState('');
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
   const [selectedParameter, setSelectedParameter] = useState(null);
   const [showEditor, setShowEditor] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
-  
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [hasNext, setHasNext] = useState(false);
-  const [hasPrev, setHasPrev] = useState(false);
-  const [totalCount, setTotalCount] = useState(0);
+  const [parameterNotFound, setParameterNotFound] = useState(false);
 
-  const fetchParameters = useCallback(async (page = 1) => {
+  const handleSearch = async () => {
+    if (!searchPath.trim()) {
+      toast.error('Please enter a parameter path');
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
-      const response = await ssmService.listParameters(page);
+      setParameterNotFound(false);
+      setSelectedParameter(null);
       
-      if (response.parameters) {
-        setParameters(response.parameters);
-      }
+      const response = await ssmService.getParameter(searchPath.trim());
       
-      if (response.pagination) {
-        setCurrentPage(response.pagination.page);
-        setTotalPages(response.pagination.totalPages);
-        setHasNext(response.pagination.hasNext);
-        setHasPrev(response.pagination.hasPrev);
-        setTotalCount(response.pagination.total);
+      if (response.parameter) {
+        setSelectedParameter(response.parameter);
+        setShowDetails(true);
       }
     } catch (err) {
-      setError(err.message);
-      toast.error('Failed to load parameters');
+      if (err.message.includes('not found')) {
+        setParameterNotFound(true);
+        setError(`Parameter not found: ${searchPath}`);
+      } else {
+        setError(err.message);
+        toast.error('Failed to fetch parameter');
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  };
 
-  useEffect(() => {
-    fetchParameters(currentPage);
-  }, [currentPage]);
-
-  // Filter parameters based on search term
-  const filteredParameters = parameters.filter(param => 
-    param.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (param.description && param.description.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
-
-  const handleParameterClick = (parameter) => {
-    setSelectedParameter(parameter);
-    setShowDetails(true);
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      handleSearch();
+    }
   };
 
   const handleEdit = (parameter) => {
@@ -82,6 +69,7 @@ function App() {
     setShowEditor(true);
     setShowHistory(false);
     setShowDetails(false);
+    setParameterNotFound(false);
   };
 
   const handleViewHistory = (parameter) => {
@@ -96,12 +84,20 @@ function App() {
       if (isCreating) {
         await ssmService.createParameter(name, value, description);
         toast.success('Parameter created successfully');
+        // After creating, set it as selected and show details
+        setSearchPath(name);
+        await handleSearch();
       } else {
         await ssmService.updateParameter(name, value, description);
         toast.success('Parameter updated successfully');
+        // Refresh the parameter details
+        const response = await ssmService.getParameter(name);
+        if (response.parameter) {
+          setSelectedParameter(response.parameter);
+          setShowDetails(true);
+        }
       }
       setShowEditor(false);
-      await fetchParameters(currentPage);
     } catch (err) {
       toast.error(err.message);
       throw err; // Let the editor handle the error
@@ -112,11 +108,6 @@ function App() {
     setShowEditor(false);
     setShowHistory(false);
     setShowDetails(false);
-    setSelectedParameter(null);
-  };
-
-  const handlePageChange = (page) => {
-    setCurrentPage(page);
   };
 
   return (
@@ -125,44 +116,63 @@ function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="py-6">
             <h1 className="text-3xl font-bold">SSM Parameter Store Manager</h1>
-            <p className="mt-2 text-gray-300">Manage AWS Systems Manager Parameter Store</p>
+            <p className="mt-2 text-gray-300">Search and manage AWS Systems Manager Parameter Store</p>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-6 flex justify-between items-center">
-          <SearchBar value={searchTerm} onChange={setSearchTerm} />
-          <button
-            onClick={handleCreate}
-            className="bg-aws-blue text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
-          >
-            Create Parameter
-          </button>
+        <div className="mb-8">
+          <div className="flex gap-4 items-end">
+            <div className="flex-1">
+              <label htmlFor="search" className="block text-sm font-medium text-gray-700 mb-2">
+                Parameter Path
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  id="search"
+                  value={searchPath}
+                  onChange={(e) => setSearchPath(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder="e.g., /application/ecdp-config/uat1/EMR-BASE/config"
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-aws-blue focus:border-transparent"
+                  disabled={loading}
+                />
+                <button
+                  onClick={handleSearch}
+                  disabled={loading}
+                  className="bg-aws-blue text-white px-6 py-2 rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Search
+                </button>
+              </div>
+            </div>
+            <button
+              onClick={handleCreate}
+              className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition-colors"
+            >
+              Create New Parameter
+            </button>
+          </div>
         </div>
 
         {error && <ErrorMessage message={error} onDismiss={() => setError(null)} />}
 
-        {loading ? (
-          <LoadingSpinner />
-        ) : (
-          <>
-            <ParameterTable
-              parameters={filteredParameters}
-              onParameterClick={handleParameterClick}
-              onEdit={handleEdit}
-              onViewHistory={handleViewHistory}
-            />
-            {totalPages > 1 && (
-              <Pagination
-                currentPage={currentPage}
-                totalPages={totalPages}
-                onPageChange={handlePageChange}
-                hasNext={hasNext}
-                hasPrev={hasPrev}
-              />
-            )}
-          </>
+        {loading && (
+          <div className="flex justify-center py-12">
+            <LoadingSpinner />
+          </div>
+        )}
+
+        {!loading && !selectedParameter && !error && (
+          <div className="bg-white shadow rounded-lg p-8 text-center">
+            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <h3 className="mt-2 text-lg font-medium text-gray-900">Search for a parameter</h3>
+            <p className="mt-1 text-gray-500">Enter a parameter path above to view its details</p>
+          </div>
         )}
 
         {showDetails && selectedParameter && (
