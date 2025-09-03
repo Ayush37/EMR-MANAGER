@@ -305,6 +305,7 @@ def index():
         'status': 'healthy',
         'endpoints': {
             'list': f'{URL_PREFIX}/list',
+            'search': f'{URL_PREFIX}/search',
             'preview': f'{URL_PREFIX}/preview',
             'download': f'{URL_PREFIX}/download',
             'generate-query': f'{URL_PREFIX}/generate-query',
@@ -392,6 +393,104 @@ def list_objects():
         
     except Exception as e:
         app.logger.error(f"Error listing objects: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+@app.route(f'{URL_PREFIX}/search', methods=['GET'])
+def search_objects():
+    """Search for objects in S3 bucket - lists all objects with prefix and filters by query"""
+    try:
+        environment = request.args.get('environment', 'uat1')
+        bucket_type = request.args.get('bucket_type', 'REFINED')
+        prefix = request.args.get('prefix', '')
+        query = request.args.get('query', '').lower()
+        
+        # Validate environment and bucket type
+        if environment not in S3_BUCKETS:
+            return jsonify({"error": "Invalid environment"}), 400
+        if bucket_type not in S3_BUCKETS[environment]:
+            return jsonify({"error": "Invalid bucket type"}), 400
+            
+        bucket_name = S3_BUCKETS[environment][bucket_type]
+        app.logger.info(f"Searching in {bucket_name} with prefix: {prefix}, query: {query}")
+        
+        # Get all objects with the prefix (no pagination for search)
+        all_items = []
+        continuation_token = None
+        
+        while True:
+            params = {
+                'Bucket': bucket_name,
+                'Prefix': prefix,
+                'Delimiter': '/',
+                'MaxKeys': 1000  # Get more items per request
+            }
+            
+            if continuation_token:
+                params['ContinuationToken'] = continuation_token
+                
+            response = s3.list_objects_v2(**params)
+            
+            # Process directories (common prefixes)
+            if 'CommonPrefixes' in response:
+                for prefix_info in response['CommonPrefixes']:
+                    dir_path = prefix_info['Prefix']
+                    dir_name = dir_path.rstrip('/').split('/')[-1]
+                    if query in dir_name.lower():  # Filter by query
+                        all_items.append({
+                            'name': dir_name,
+                            'path': dir_path,
+                            'type': 'directory',
+                            'size': '-',
+                            'lastModified': '-'
+                        })
+            
+            # Process files (only .parquet files)
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    key = obj['Key']
+                    # Skip if it's the prefix itself
+                    if key == prefix:
+                        continue
+                    # Only include .parquet files
+                    if key.endswith('.parquet'):
+                        file_name = key.split('/')[-1]
+                        if query in file_name.lower():  # Filter by query
+                            all_items.append({
+                                'name': file_name,
+                                'path': key,
+                                'type': 'file',
+                                'size': obj['Size'],
+                                'lastModified': obj['LastModified'].isoformat() if hasattr(obj['LastModified'], 'isoformat') else str(obj['LastModified'])
+                            })
+            
+            # Check if there are more items
+            if response.get('IsTruncated', False):
+                continuation_token = response.get('NextContinuationToken')
+            else:
+                break
+        
+        # Sort results (directories first, then files)
+        directories = [item for item in all_items if item['type'] == 'directory']
+        files = [item for item in all_items if item['type'] == 'file']
+        directories.sort(key=lambda x: x['name'])
+        files.sort(key=lambda x: x['name'])
+        
+        items = directories + files
+        
+        app.logger.info(f"Search found {len(items)} items matching '{query}'")
+        
+        return jsonify({
+            'items': items[:100],  # Limit results to 100 to prevent UI overload
+            'totalMatches': len(items),
+            'query': query,
+            'prefix': prefix,
+            'bucket': bucket_name,
+            'environment': environment,
+            'bucketType': bucket_type
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error searching objects: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route(f'{URL_PREFIX}/preview', methods=['GET'])

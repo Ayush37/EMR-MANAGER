@@ -114,6 +114,28 @@ class S3DataService {
       throw error;
     }
   }
+
+  async searchObjects({ environment, bucketType, prefix = '', query }) {
+    try {
+      const params = new URLSearchParams({
+        environment,
+        bucket_type: bucketType,
+        prefix,
+        query
+      });
+      
+      const response = await fetch(`${API_BASE_URL}/search?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      return this.handleResponse(response);
+    } catch (error) {
+      console.error('Error searching objects:', error);
+      throw error;
+    }
+  }
 }
 
 export default new S3DataService();

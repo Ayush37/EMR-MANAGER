@@ -25,6 +25,13 @@ function App() {
   const [pageToken, setPageToken] = useState('');
   const [hasMore, setHasMore] = useState(false);
   
+  // Search functionality states
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchMode, setSearchMode] = useState('client'); // 'client' or 'server'
+  const [isSearching, setIsSearching] = useState(false);
+  const [allItems, setAllItems] = useState([]); // Store all items for client-side filtering
+  const [searchTimer, setSearchTimer] = useState(null);
+  
   // Breadcrumb navigation
   const pathParts = currentPath ? currentPath.split('/').filter(p => p) : [];
   
@@ -55,13 +62,23 @@ function App() {
       });
       
       if (nextPageToken) {
-        setItems(prev => [...prev, ...response.items]);
+        const newItems = [...items, ...response.items];
+        setItems(newItems);
+        setAllItems(newItems);
       } else {
         setItems(response.items);
+        setAllItems(response.items);
+        // Determine search mode based on pagination
+        setSearchMode(response.isTruncated ? 'server' : 'client');
       }
       
       setPageToken(response.nextPageToken || '');
       setHasMore(response.isTruncated || false);
+      
+      // Clear search when loading new items
+      if (!nextPageToken) {
+        setSearchTerm('');
+      }
     } catch (err) {
       setError(err.message);
       toast.error('Failed to load items');
@@ -74,6 +91,7 @@ function App() {
     setCurrentPath(path);
     setSelectedFile(null);
     setPageToken('');
+    clearSearch(); // Clear search when navigating
   };
   
   const handleFileSelect = (file) => {
@@ -88,6 +106,71 @@ function App() {
   const handleLoadMore = () => {
     if (hasMore && pageToken) {
       loadItems(pageToken);
+    }
+  };
+
+  // Search functionality
+  const handleSearch = useCallback(async (term) => {
+    if (!term.trim()) {
+      setItems(allItems);
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true);
+
+    if (searchMode === 'client') {
+      // Client-side filtering for small directories
+      const filtered = allItems.filter(item =>
+        item.name.toLowerCase().includes(term.toLowerCase())
+      );
+      setItems(filtered);
+      setIsSearching(false);
+    } else {
+      // Server-side search for large directories
+      try {
+        const response = await s3DataService.searchObjects({
+          environment,
+          bucketType,
+          prefix: currentPath,
+          query: term
+        });
+        setItems(response.items || []);
+      } catch (err) {
+        toast.error('Search failed: ' + err.message);
+      } finally {
+        setIsSearching(false);
+      }
+    }
+  }, [allItems, searchMode, environment, bucketType, currentPath]);
+
+  // Debounced search for server-side
+  const handleSearchChange = (value) => {
+    setSearchTerm(value);
+    
+    if (searchTimer) {
+      clearTimeout(searchTimer);
+    }
+
+    if (searchMode === 'client') {
+      // Immediate search for client-side
+      handleSearch(value);
+    } else {
+      // Debounced search for server-side
+      const timer = setTimeout(() => {
+        handleSearch(value);
+      }, 500);
+      setSearchTimer(timer);
+    }
+  };
+
+  // Clear search when navigating
+  const clearSearch = () => {
+    setSearchTerm('');
+    setItems(allItems);
+    setIsSearching(false);
+    if (searchTimer) {
+      clearTimeout(searchTimer);
     }
   };
 
@@ -161,6 +244,11 @@ function App() {
               selectedFile={selectedFile}
               hasMore={hasMore}
               onLoadMore={handleLoadMore}
+              searchTerm={searchTerm}
+              onSearchChange={handleSearchChange}
+              searchMode={searchMode}
+              isSearching={isSearching}
+              totalItems={allItems.length}
             />
           </div>
           

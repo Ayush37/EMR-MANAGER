@@ -1,7 +1,21 @@
 import React from 'react';
 import { formatFileSize, formatDate } from '../utils/formatters';
 
-const S3Browser = ({ items, loading, currentPath, onNavigate, onFileSelect, selectedFile, hasMore, onLoadMore }) => {
+const S3Browser = ({ 
+  items, 
+  loading, 
+  currentPath, 
+  onNavigate, 
+  onFileSelect, 
+  selectedFile, 
+  hasMore, 
+  onLoadMore,
+  searchTerm,
+  onSearchChange,
+  searchMode,
+  isSearching,
+  totalItems
+}) => {
   if (loading && items.length === 0) {
     return (
       <div className="p-8 text-center">
@@ -11,7 +25,7 @@ const S3Browser = ({ items, loading, currentPath, onNavigate, onFileSelect, sele
     );
   }
 
-  if (!loading && items.length === 0) {
+  if (!loading && items.length === 0 && !searchTerm) {
     return (
       <div className="p-8 text-center text-gray-500">
         <svg
@@ -33,8 +47,80 @@ const S3Browser = ({ items, loading, currentPath, onNavigate, onFileSelect, sele
   }
 
   return (
-    <div className="h-[600px] overflow-auto">
-      <table className="min-w-full divide-y divide-gray-200">
+    <div>
+      {/* Search Bar */}
+      <div className="p-4 border-b border-gray-200">
+        <div className="relative">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder={`Search in current folder${searchMode === 'server' ? ' (searching all ' + totalItems + ' items)' : ''}...`}
+            className="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-aws-blue focus:border-aws-blue sm:text-sm"
+          />
+          {searchTerm && (
+            <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+              <button
+                onClick={() => onSearchChange('')}
+                className="text-gray-400 hover:text-gray-500"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          )}
+        </div>
+        {/* Search mode indicator */}
+        <div className="mt-2 text-xs text-gray-500">
+          {searchMode === 'server' ? (
+            <span className="flex items-center">
+              <svg className="animate-pulse h-3 w-3 mr-1 text-aws-blue" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+              </svg>
+              Server-side search {isSearching && '(searching...)'}
+            </span>
+          ) : (
+            <span>Filtering visible items</span>
+          )}
+        </div>
+      </div>
+
+      {/* No search results */}
+      {!loading && items.length === 0 && searchTerm && (
+        <div className="p-8 text-center text-gray-500">
+          <svg
+            className="mx-auto h-12 w-12 text-gray-400"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            />
+          </svg>
+          <p className="mt-2">No results found for "{searchTerm}"</p>
+          <button
+            onClick={() => onSearchChange('')}
+            className="mt-2 text-sm text-aws-blue hover:text-blue-700"
+          >
+            Clear search
+          </button>
+        </div>
+      )}
+
+      {/* Table */}
+      {(items.length > 0 || loading) && (
+      <div className="h-[520px] overflow-auto">
+        <table className="min-w-full divide-y divide-gray-200">
         <thead className="bg-gray-50 sticky top-0">
           <tr>
             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -120,6 +206,8 @@ const S3Browser = ({ items, loading, currentPath, onNavigate, onFileSelect, sele
             {loading ? 'Loading...' : 'Load More'}
           </button>
         </div>
+      )}
+      </div>
       )}
     </div>
   );
