@@ -122,7 +122,11 @@ def list_objects():
         prefix = request.args.get('prefix', '')
         delimiter = request.args.get('delimiter', '/')
         page = int(request.args.get('page', 1))
-        limit = int(request.args.get('limit', 50))
+        limit = int(request.args.get('limit', 100))
+        
+        # Ensure limit is reasonable (max 500)
+        if limit > 500:
+            limit = 500
         
         # Ensure prefix starts with base path
         if not prefix:
@@ -136,7 +140,7 @@ def list_objects():
         if full_prefix and not full_prefix.endswith('/'):
             full_prefix += '/'
         
-        app.logger.info(f'Listing objects in bucket: {S3_BUCKET}, prefix: {full_prefix}')
+        app.logger.info(f'Listing objects in bucket: {S3_BUCKET}, prefix: {full_prefix}, page: {page}, limit: {limit}')
         
         # Use paginator for large result sets
         paginator = s3.get_paginator('list_objects_v2')
@@ -145,8 +149,7 @@ def list_objects():
             Prefix=full_prefix,
             Delimiter=delimiter,
             PaginationConfig={
-                'MaxItems': limit * page,
-                'PageSize': limit
+                'PageSize': 1000  # Get more items per AWS API call for efficiency
             }
         )
         
@@ -209,6 +212,8 @@ def list_objects():
                 if part:
                     current_path += part + '/'
                     breadcrumb.append({'name': part, 'path': current_path})
+        
+        app.logger.info(f'Returning {len(folders)} folders and {len(files)} files, total items: {total_items}, page {page}/{total_pages}')
         
         return jsonify({
             'folders': folders,

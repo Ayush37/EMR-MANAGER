@@ -24,7 +24,7 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [pageSize] = useState(50);
+  const [pageSize] = useState(100);
 
   // Load directory contents
   const loadDirectory = useCallback(async (path = '', page = 1) => {
@@ -159,6 +159,15 @@ function App() {
           </div>
         </div>
 
+        {/* Summary Info */}
+        {!loading && !error && (
+          <div className="mb-4 text-sm text-gray-600">
+            Showing {filteredFolders.length} folders and {filteredFiles.length} files
+            {searchTerm && ` matching "${searchTerm}"`}
+            {totalPages > 1 && ` (Page ${currentPage} of ${totalPages})`}
+          </div>
+        )}
+
         {/* File Browser */}
         <div className="bg-white rounded-lg shadow">
           {loading ? (
@@ -280,10 +289,10 @@ function App() {
 
               {/* Pagination */}
               {totalPages > 1 && (
-                <div className="px-6 py-4 border-t">
+                <div className="px-6 py-4 border-t bg-gray-50">
                   <div className="flex items-center justify-between">
-                    <div className="text-sm text-gray-700">
-                      Page {currentPage} of {totalPages}
+                    <div className="text-sm text-gray-700 font-medium">
+                      Page {currentPage} of {totalPages} ({folders.length + files.length} items on this page)
                     </div>
                     <div className="flex space-x-2">
                       <button
