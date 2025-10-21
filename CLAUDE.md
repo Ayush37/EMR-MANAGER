@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Current Status (Last Updated: 2025-07-16)
+## Current Status (Last Updated: 2025-09-05)
 
 ### Working Features
 - ✅ EMR cluster management with multi-environment support (UAT1/2/3)
@@ -17,6 +17,46 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - ✅ Health checks configured for ECS (dual endpoints)
 - ✅ Step logs viewer - View stdout/stderr from S3 for both steps and containers
 - ✅ AI-powered step analysis using Azure OpenAI (FIXED: token expiration)
+- ✅ **SSM Parameter Search-Based Interface** (NEW) - Search specific parameters instead of listing all
+- ✅ **S3 Data Viewer Search** (NEW) - Smart search with client/server modes for directories
+
+### Recent Session Work (2025-09-05)
+
+1. **SSM Service Timeout Fixes** ✅:
+   - **Problem**: Network timeouts (504 errors) when loading large parameter lists
+   - **Solution**: 
+     - Backend: Increased Waitress timeout from 120s → 300s (5 minutes)
+     - Backend: Added thread pool (6), connection limit (200), cleanup interval (30s)
+     - Frontend: Added AbortController with 5-minute timeout for listParameters
+     - Frontend: Added 1-minute timeouts for other API calls
+   - **Result**: Timeout errors resolved for large parameter lists
+
+2. **SSM Service Redesign - Search-Based Interface** ✅:
+   - **Problem**: Auto-loading all parameters caused 504 gateway timeouts
+   - **Solution**: Complete frontend redesign to search-based interface
+   - **Implementation**:
+     - Removed automatic parameter listing on page load
+     - Added parameter path search input
+     - Users search by full parameter path
+     - All features maintained: view, edit, create, history
+     - Backend unchanged - all endpoints still available
+   - **Result**: No more timeouts, faster and more responsive UI
+
+3. **S3 Data Viewer Search Feature** ✅:
+   - **Smart Dual-Mode Search**:
+     - Client-side: For small directories (instant filtering)
+     - Server-side: For large directories with pagination
+   - **Frontend Implementation**:
+     - Search input with clear button in S3Browser
+     - Auto-detects search mode based on pagination
+     - Debounced search (500ms) for server queries
+     - Shows search mode indicator
+     - "No results found" with clear option
+   - **Backend Implementation**:
+     - New `/s3data-api/search` endpoint
+     - Searches ALL items in directory (not just visible)
+     - Returns max 100 results to prevent UI overload
+   - **Result**: Users can quickly find folders/files in large directories
 
 ### Recent Session Work (2025-07-16)
 
@@ -154,10 +194,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. **Container Logs Not Loading**: Fixed useCallback dependencies in StepLogsModal
 3. **Docker Build Failures**: Remove pandas or use pre-built wheels
 4. **Azure OpenAI Auth Failures**: Check all env vars, PEM file permissions, and use test endpoint
-
-### Known Issues and Solutions
-
-1. **S3 Data Service Loading Issue**: 
+5. **SSM Parameter List Timeouts** ✅ **FIXED**:
+   - **Previous Issue**: 504 gateway timeout when loading many parameters
+   - **Solution**: Increased backend timeout to 300s, added frontend timeout handling
+   - **Alternative**: Use search-based interface (implemented)
+6. **AWS SSM MaxResults Limit** ✅ **FIXED**:
+   - **Error**: ValidationException - MaxResults must be ≤ 10
+   - **Solution**: Keep MaxResults at 10 (AWS API limit)
+7. **S3 Data Backend Build Error** (Current):
+   - **Error**: "No module found error 'Encodings'" during `make ci`
+   - **Workaround**: Add `# -*- coding: utf-8 -*-` to app.py
+   - **Root Cause**: Python environment encoding issue
+8. **S3 Data Service Loading Issue**: 
    - If S3 Data shows multiple sidebars, check ALB routing
    - Ensure `/s3data/*` routes to S3 Data frontend, not home frontend
    - Temporary fix: Added trailing slash to path in home-frontend App.js
@@ -250,10 +298,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### For Next Session
 To continue work, reference:
 - This CLAUDE.md file for complete project context
-- Recent commits show Azure OpenAI token fix and AWS-XCESS portal
-- LROT_AZURE.py demonstrates the working token pattern
-- AWS-XCESS portal at `/` provides unified access to all services
-- Test Azure OpenAI with GET /api/test-azure-openai endpoint
+- Recent commits show SSM redesign and S3 Data search feature
+- SSM now uses search-based interface (no auto-loading)
+- S3 Data has smart search with client/server modes
+- Fix S3 Data backend build error: check Python encoding issues
+- Consider implementing bulk download for S3 Data Viewer (discussed but not implemented)
 - All services follow similar patterns - use S3 Data as latest template
 
 ### Session Summary (2025-07-16 - Continued)
@@ -999,3 +1048,23 @@ Services work seamlessly within AWS-XCESS without modification. The portal handl
 - Global search across services
 - Service health indicators
 - User preferences/favorites
+
+## Session Summary (2025-09-05)
+
+This session focused on fixing timeout issues and implementing search functionality:
+
+1. **SSM Service Improvements**:
+   - Fixed 504 gateway timeouts with increased backend/frontend timeouts
+   - Redesigned to search-based interface (no auto-loading)
+   - AWS SSM API MaxResults validation error fixed
+
+2. **S3 Data Viewer Search Feature**:
+   - Added smart dual-mode search (client/server)
+   - Searches entire directory, not just visible items
+   - Debounced server-side search with visual indicators
+
+3. **Outstanding Issues**:
+   - S3 Data backend build error with Python encoding
+   - Bulk download feature for S3 Data (discussed but not implemented)
+
+All changes have been committed and pushed to main branch.
