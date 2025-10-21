@@ -213,7 +213,10 @@ def list_objects():
                     current_path += part + '/'
                     breadcrumb.append({'name': part, 'path': current_path})
         
-        app.logger.info(f'Returning {len(folders)} folders and {len(files)} files, total items: {total_items}, page {page}/{total_pages}')
+        # Check if there are more items beyond current page
+        is_truncated = page < total_pages
+        
+        app.logger.info(f'Returning {len(folders)} folders and {len(files)} files, total items: {total_items}, page {page}/{total_pages}, truncated: {is_truncated}')
         
         return jsonify({
             'folders': folders,
@@ -224,7 +227,8 @@ def list_objects():
                 'limit': limit,
                 'total': total_items,
                 'totalPages': total_pages
-            }
+            },
+            'isTruncated': is_truncated
         }), 200
         
     except ClientError as e:
@@ -232,6 +236,125 @@ def list_objects():
         return jsonify({'error': f'AWS error: {str(e)}'}), 500
     except Exception as e:
         app.logger.error(f'Error listing objects: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+# Search objects in S3 path
+@app.route(f'{URL_PREFIX}/search', methods=['GET'])
+def search_objects():
+    """Search for objects in S3 path - lists all objects with prefix and filters by query"""
+    try:
+        prefix = request.args.get('prefix', '')
+        query = request.args.get('query', '').lower()
+        delimiter = request.args.get('delimiter', '/')
+        
+        # Ensure prefix starts with base path
+        if not prefix:
+            full_prefix = BASE_PATH
+        elif prefix.startswith(BASE_PATH):
+            full_prefix = prefix
+        else:
+            full_prefix = BASE_PATH + prefix
+        
+        # Ensure prefix ends with / for folder listing
+        if full_prefix and not full_prefix.endswith('/'):
+            full_prefix += '/'
+        
+        app.logger.info(f'Searching in bucket: {S3_BUCKET}, prefix: {full_prefix}, query: {query}')
+        
+        # Get all objects with the prefix (no pagination for search)
+        all_folders = []
+        all_files = []
+        continuation_token = None
+        
+        while True:
+            params = {
+                'Bucket': S3_BUCKET,
+                'Prefix': full_prefix,
+                'Delimiter': delimiter,
+                'MaxKeys': 1000  # Get more items per request
+            }
+            
+            if continuation_token:
+                params['ContinuationToken'] = continuation_token
+                
+            response = s3.list_objects_v2(**params)
+            
+            # Process folders (CommonPrefixes)
+            if 'CommonPrefixes' in response:
+                for prefix_info in response['CommonPrefixes']:
+                    folder_path = prefix_info['Prefix']
+                    folder_name = folder_path.rstrip('/').split('/')[-1]
+                    if query in folder_name.lower():  # Filter by query
+                        all_folders.append({
+                            'name': folder_name,
+                            'path': folder_path,
+                            'type': 'folder'
+                        })
+            
+            # Process files (Contents)
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    # Skip the folder itself
+                    if obj['Key'] == full_prefix:
+                        continue
+                    
+                    file_path = obj['Key']
+                    file_name = file_path.split('/')[-1]
+                    if query in file_name.lower():  # Filter by query
+                        all_files.append({
+                            'name': file_name,
+                            'path': file_path,
+                            'type': 'file',
+                            'size': obj['Size'],
+                            'lastModified': obj['LastModified'].isoformat()
+                        })
+            
+            # Check if there are more items
+            if response.get('IsTruncated', False):
+                continuation_token = response.get('NextContinuationToken')
+            else:
+                break
+        
+        # Sort results (folders first, then files)
+        all_folders.sort(key=lambda x: x['name'])
+        all_files.sort(key=lambda x: x['name'])
+        
+        # Combine results
+        all_items = all_folders + all_files
+        
+        # Build breadcrumb
+        breadcrumb = []
+        if full_prefix != BASE_PATH:
+            parts = full_prefix.replace(BASE_PATH, '').strip('/').split('/')
+            current_path = BASE_PATH
+            breadcrumb.append({'name': 'Root', 'path': BASE_PATH})
+            
+            for part in parts:
+                if part:
+                    current_path += part + '/'
+                    breadcrumb.append({'name': part, 'path': current_path})
+        
+        app.logger.info(f"Search found {len(all_items)} items matching '{query}'")
+        
+        # Limit results to prevent UI overload
+        max_results = 200  # Higher than S3 Data Viewer since these are logs
+        limited_items = all_items[:max_results]
+        
+        return jsonify({
+            'folders': [item for item in limited_items if item['type'] == 'folder'],
+            'files': [item for item in limited_items if item['type'] == 'file'],
+            'breadcrumb': breadcrumb,
+            'totalMatches': len(all_items),
+            'query': query,
+            'isSearch': True,
+            'resultLimited': len(all_items) > max_results
+        }), 200
+        
+    except ClientError as e:
+        app.logger.error(f'AWS error searching objects: {str(e)}')
+        return jsonify({'error': f'AWS error: {str(e)}'}), 500
+    except Exception as e:
+        app.logger.error(f'Error searching objects: {str(e)}')
         return jsonify({'error': str(e)}), 500
 
 # Get file content

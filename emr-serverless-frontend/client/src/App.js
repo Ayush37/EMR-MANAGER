@@ -10,7 +10,8 @@ import {
   MagnifyingGlassIcon,
   ArrowPathIcon,
   ChevronRightIcon,
-  HomeIcon
+  HomeIcon,
+  XMarkIcon
 } from '@heroicons/react/24/outline';
 
 function App() {
@@ -25,12 +26,19 @@ function App() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [pageSize] = useState(100);
+  const [searchMode, setSearchMode] = useState('client');
+  const [isSearching, setIsSearching] = useState(false);
+  const [allFolders, setAllFolders] = useState([]);
+  const [allFiles, setAllFiles] = useState([]);
+  const [searchTimer, setSearchTimer] = useState(null);
+  const [isTruncated, setIsTruncated] = useState(false);
 
   // Load directory contents
   const loadDirectory = useCallback(async (path = '', page = 1) => {
     try {
       setLoading(true);
       setError(null);
+      setSearchTerm(''); // Clear search when navigating
 
       const data = await emrServerlessService.listObjects(path, page, pageSize);
       
@@ -40,6 +48,16 @@ function App() {
       setCurrentPage(data.pagination.page);
       setTotalPages(data.pagination.totalPages);
       setCurrentPath(path);
+      setIsTruncated(data.isTruncated || false);
+      
+      // Store all items for client-side search
+      if (page === 1) {
+        setAllFolders(data.folders || []);
+        setAllFiles(data.files || []);
+      }
+      
+      // Determine search mode based on truncation
+      setSearchMode(data.isTruncated ? 'server' : 'client');
       
     } catch (err) {
       console.error('Error loading directory:', err);
@@ -56,11 +74,17 @@ function App() {
 
   const navigateToFolder = (folderPath) => {
     setCurrentPage(1);
+    if (searchTimer) {
+      clearTimeout(searchTimer);
+    }
     loadDirectory(folderPath, 1);
   };
 
   const navigateToBreadcrumb = (path) => {
     setCurrentPage(1);
+    if (searchTimer) {
+      clearTimeout(searchTimer);
+    }
     loadDirectory(path, 1);
   };
 
@@ -81,13 +105,64 @@ function App() {
     }
   };
 
-  // Filter items based on search
-  const filteredFolders = folders.filter(folder => 
-    folder.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-  const filteredFiles = files.filter(file => 
-    file.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Search functionality
+  const handleSearch = useCallback(async (term) => {
+    if (!term.trim()) {
+      setFolders(allFolders);
+      setFiles(allFiles);
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true);
+
+    if (searchMode === 'client') {
+      // Client-side filtering for small directories
+      const filteredFolders = allFolders.filter(folder =>
+        folder.name.toLowerCase().includes(term.toLowerCase())
+      );
+      const filteredFiles = allFiles.filter(file =>
+        file.name.toLowerCase().includes(term.toLowerCase())
+      );
+      setFolders(filteredFolders);
+      setFiles(filteredFiles);
+      setIsSearching(false);
+    } else {
+      // Server-side search for large directories
+      try {
+        const response = await emrServerlessService.searchObjects(currentPath, term);
+        setFolders(response.folders || []);
+        setFiles(response.files || []);
+        if (response.resultLimited) {
+          toast.info(`Showing first ${response.folders.length + response.files.length} of ${response.totalMatches} matches`);
+        }
+      } catch (err) {
+        toast.error('Search failed: ' + err.message);
+      } finally {
+        setIsSearching(false);
+      }
+    }
+  }, [allFolders, allFiles, searchMode, currentPath]);
+
+  // Debounced search handler
+  const handleSearchChange = (value) => {
+    setSearchTerm(value);
+    
+    if (searchTimer) {
+      clearTimeout(searchTimer);
+    }
+
+    if (searchMode === 'client') {
+      // Immediate search for client-side
+      handleSearch(value);
+    } else {
+      // Debounced search for server-side
+      const timer = setTimeout(() => {
+        handleSearch(value);
+      }, 500);
+      setSearchTimer(timer);
+    }
+  };
 
   // Format file size
   const formatSize = (bytes) => {
@@ -138,33 +213,58 @@ function App() {
 
         {/* Search and Actions */}
         <div className="bg-white rounded-lg shadow mb-4 p-4">
-          <div className="flex items-center space-x-4">
-            <div className="flex-1 relative">
-              <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search files and folders..."
-                className="w-full pl-10 pr-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-aws-blue"
-              />
+          <div className="flex flex-col space-y-2">
+            <div className="flex items-center space-x-4">
+              <div className="flex-1 relative">
+                <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  placeholder={`Search ${searchMode === 'server' && isTruncated ? 'all items in folder' : 'visible items'}...`}
+                  className="w-full pl-10 pr-10 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-aws-blue"
+                />
+                {searchTerm && (
+                  <button
+                    onClick={() => handleSearchChange('')}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={handleRefresh}
+                disabled={loading}
+                className="p-2 text-gray-600 hover:bg-gray-100 rounded transition-colors disabled:opacity-50"
+              >
+                <ArrowPathIcon className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
+              </button>
             </div>
-            <button
-              onClick={handleRefresh}
-              disabled={loading}
-              className="p-2 text-gray-600 hover:bg-gray-100 rounded transition-colors disabled:opacity-50"
-            >
-              <ArrowPathIcon className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
-            </button>
+            {/* Search mode indicator */}
+            <div className="text-xs text-gray-500">
+              {searchMode === 'server' && isTruncated ? (
+                <span className="flex items-center">
+                  <svg className="animate-pulse h-3 w-3 mr-1 text-aws-blue" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+                  </svg>
+                  Server-side search {isSearching && '(searching...)'}
+                </span>
+              ) : (
+                <span>Filtering visible items</span>
+              )}
+            </div>
           </div>
         </div>
 
         {/* Summary Info */}
         {!loading && !error && (
           <div className="mb-4 text-sm text-gray-600">
-            Showing {filteredFolders.length} folders and {filteredFiles.length} files
+            Showing {folders.length} folders and {files.length} files
             {searchTerm && ` matching "${searchTerm}"`}
-            {totalPages > 1 && ` (Page ${currentPage} of ${totalPages})`}
+            {totalPages > 1 && !searchTerm && ` (Page ${currentPage} of ${totalPages})`}
           </div>
         )}
 
@@ -212,7 +312,7 @@ function App() {
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {/* Folders */}
-                    {filteredFolders.map((folder) => (
+                    {folders.map((folder) => (
                       <tr
                         key={folder.path}
                         className="hover:bg-gray-50 cursor-pointer"
@@ -241,7 +341,7 @@ function App() {
                     ))}
                     
                     {/* Files */}
-                    {filteredFiles.map((file) => (
+                    {files.map((file) => (
                       <tr
                         key={file.path}
                         className="hover:bg-gray-50"
@@ -276,10 +376,22 @@ function App() {
                       </tr>
                     ))}
 
-                    {filteredFolders.length === 0 && filteredFiles.length === 0 && (
+                    {folders.length === 0 && files.length === 0 && (
                       <tr>
                         <td colSpan="4" className="px-6 py-8 text-center text-gray-500">
-                          {searchTerm ? 'No matching items found' : 'No files or folders in this directory'}
+                          {searchTerm ? (
+                            <div>
+                              <p>No matching items found for "{searchTerm}"</p>
+                              <button
+                                onClick={() => handleSearchChange('')}
+                                className="mt-2 text-aws-blue hover:underline"
+                              >
+                                Clear search
+                              </button>
+                            </div>
+                          ) : (
+                            'No files or folders in this directory'
+                          )}
                         </td>
                       </tr>
                     )}
@@ -287,8 +399,8 @@ function App() {
                 </table>
               </div>
 
-              {/* Pagination */}
-              {totalPages > 1 && (
+              {/* Pagination - only show when not searching */}
+              {totalPages > 1 && !searchTerm && (
                 <div className="px-6 py-4 border-t bg-gray-50">
                   <div className="flex items-center justify-between">
                     <div className="text-sm text-gray-700 font-medium">

@@ -70,6 +70,31 @@ class EmrServerlessService {
       throw error;
     }
   }
+
+  async searchObjects(prefix = '', query = '') {
+    try {
+      const params = new URLSearchParams({
+        prefix,
+        query
+      });
+
+      const response = await fetch(`${API_BASE_URL}/serverless-api/search?${params}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error searching objects:', error);
+      throw error;
+    }
+  }
 }
 
 export default new EmrServerlessService();
