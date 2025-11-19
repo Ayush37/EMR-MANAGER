@@ -8,6 +8,7 @@ from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
+from botocore.config import Config
 import gzip
 import re
 from io import BytesIO
@@ -59,26 +60,36 @@ app.logger.info(f'EMR Backend service started with log level: {log_level}')
 # AWS Configuration
 AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
 
+# Configure boto3 client settings with timeouts
+boto_config = Config(
+    read_timeout=60,        # 60 seconds read timeout
+    connect_timeout=10,     # 10 seconds connection timeout
+    retries={
+        'max_attempts': 2,
+        'mode': 'standard'
+    }
+)
+
 # Initialize AWS clients
 try:
     # Check if running in ECS/Lambda (AWS_EXECUTION_ENV is set) or if profile is explicitly disabled
     if os.getenv('AWS_EXECUTION_ENV') or os.getenv('USE_IAM_ROLE', 'false').lower() == 'true':
         # Use IAM role credentials (for ECS/Lambda)
         session = boto3.Session(region_name=AWS_REGION)
-        ssm = session.client('ssm')
-        emr = session.client('emr')
-        lambda_client = session.client('lambda')
-        s3 = session.client('s3')
-        app.logger.info('AWS session initialized with IAM role credentials')
+        ssm = session.client('ssm', config=boto_config)
+        emr = session.client('emr', config=boto_config)
+        lambda_client = session.client('lambda', config=boto_config)
+        s3 = session.client('s3', config=boto_config)
+        app.logger.info('AWS session initialized with IAM role credentials and timeout configuration')
     else:
         # Use profile for local development
         AWS_PROFILE = os.getenv('AWS_PROFILE', 'adfsjit')
         session = boto3.Session(profile_name=AWS_PROFILE, region_name=AWS_REGION)
-        ssm = session.client('ssm')
-        emr = session.client('emr')
-        lambda_client = session.client('lambda')
-        s3 = session.client('s3')
-        app.logger.info(f'AWS session initialized with profile: {AWS_PROFILE}')
+        ssm = session.client('ssm', config=boto_config)
+        emr = session.client('emr', config=boto_config)
+        lambda_client = session.client('lambda', config=boto_config)
+        s3 = session.client('s3', config=boto_config)
+        app.logger.info(f'AWS session initialized with profile: {AWS_PROFILE} and timeout configuration')
 except Exception as e:
     app.logger.error(f'Failed to initialize AWS session: {str(e)}')
     ssm = None
@@ -1476,19 +1487,41 @@ def get_cluster_configs(environment='uat1'):
         return []
 
 def list_emr_clusters():
-    """Fetches the current state of all EMR clusters"""
-    app.logger.debug("Fetching EMR clusters")
+    """Fetches the current state of all EMR clusters with pagination support"""
+    app.logger.debug("Fetching EMR clusters with pagination")
     states = ["STARTING", "BOOTSTRAPPING", "RUNNING", "WAITING", "TERMINATING", "TERMINATED", "TERMINATED_WITH_ERRORS"]
+    all_clusters = []
+    
     try:
-        response = emr.list_clusters(ClusterStates=states)
-        clusters = response.get('Clusters', [])
-        app.logger.debug(f"Found {len(clusters)} EMR clusters")
+        marker = None
+        page_count = 0
         
-        # Log each cluster name
-        for cluster in clusters:
-            app.logger.debug(f"EMR Cluster: {cluster['Name']} - State: {cluster['Status']['State']}")
+        while True:
+            page_count += 1
+            app.logger.debug(f"Fetching EMR clusters page {page_count}")
             
-        return clusters
+            # Build request parameters
+            params = {'ClusterStates': states}
+            if marker:
+                params['Marker'] = marker
+            
+            response = emr.list_clusters(**params)
+            clusters = response.get('Clusters', [])
+            all_clusters.extend(clusters)
+            
+            app.logger.debug(f"Page {page_count}: Found {len(clusters)} clusters")
+            
+            # Log each cluster name
+            for cluster in clusters:
+                app.logger.debug(f"EMR Cluster: {cluster['Name']} - State: {cluster['Status']['State']}")
+            
+            # Check if there are more pages
+            marker = response.get('Marker')
+            if not marker:
+                break
+                
+        app.logger.debug(f"Total EMR clusters found: {len(all_clusters)}")
+        return all_clusters
     except Exception as e:
         app.logger.error(f"Error listing EMR clusters: {str(e)}", exc_info=True)
         return []
@@ -1575,6 +1608,14 @@ def map_cluster_states(cluster_configs, emr_clusters):
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 3700))
-    app.logger.info(f"Starting EMR Backend server on port {port}")
-    app.run(host='0.0.0.0', port=port, debug=False)
+    
+    if os.environ.get('FLASK_ENV') == 'development':
+        app.logger.info(f"Starting EMR Backend server in development mode on port {port}")
+        app.run(host='0.0.0.0', port=port, debug=True)
+    else:
+        from waitress import serve
+        app.logger.info(f'Starting EMR Backend service with Waitress on port {port}')
+        # Increase timeout to 300 seconds (5 minutes) for large cluster lists
+        serve(app, host='0.0.0.0', port=port, threads=6, connection_limit=200, 
+              cleanup_interval=30, channel_timeout=300)
 
