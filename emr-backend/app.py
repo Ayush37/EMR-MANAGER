@@ -16,6 +16,7 @@ from io import BytesIO
 from azure.identity import CertificateCredential
 from openai import AzureOpenAI
 from functools import wraps
+import threading
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -154,6 +155,88 @@ def emr_cancel_steps(**kwargs):
     """Cancel EMR steps with retry logic for throttling"""
     return emr.cancel_steps(**kwargs)
 
+def update_cluster_cache():
+    """Background function to update cluster cache"""
+    with cluster_cache['lock']:
+        if cluster_cache['is_updating']:
+            app.logger.warning("Cache update already in progress, skipping")
+            return
+        cluster_cache['is_updating'] = True
+        cluster_cache['status'] = 'updating'
+    
+    try:
+        app.logger.info("Starting cluster cache update")
+        start_time = time.time()
+        
+        # Fetch all cluster configurations from all environments
+        all_configs = []
+        for env in ['uat1', 'uat2', 'uat3']:
+            configs = get_cluster_configs(env)
+            all_configs.extend(configs)
+        
+        # Fetch all EMR clusters
+        emr_clusters = list_emr_clusters()
+        
+        # Merge cluster data
+        merged_clusters = map_cluster_states(all_configs, emr_clusters)
+        
+        # Sort clusters by state priority and last activity
+        state_priority = {
+            'RUNNING': 1, 'STARTING': 2, 'BOOTSTRAPPING': 3, 
+            'WAITING': 4, 'TERMINATING': 5, 'TERMINATED': 6, 
+            'TERMINATED_WITH_ERRORS': 7
+        }
+        
+        def sort_key(cluster):
+            state = cluster.get('state', 'UNKNOWN')
+            priority = state_priority.get(state, 8)
+            
+            # Get most recent timestamp
+            timeline = cluster.get('timeline', {})
+            timestamps = []
+            if timeline:
+                for key in ['EndDateTime', 'ReadyDateTime', 'CreationDateTime']:
+                    if key in timeline and timeline[key]:
+                        try:
+                            timestamps.append(datetime.fromisoformat(timeline[key].replace('Z', '+00:00')))
+                        except:
+                            pass
+            
+            most_recent = max(timestamps) if timestamps else datetime.min
+            return (priority, -most_recent.timestamp() if most_recent != datetime.min else float('inf'))
+        
+        merged_clusters.sort(key=sort_key)
+        
+        # Update cache with new data
+        with cluster_cache['lock']:
+            cluster_cache['data'] = merged_clusters
+            cluster_cache['last_updated'] = datetime.now()
+            cluster_cache['next_refresh'] = datetime.now() + timedelta(seconds=CACHE_REFRESH_INTERVAL)
+            cluster_cache['status'] = 'ready'
+            cluster_cache['error_message'] = None
+            cluster_cache['is_updating'] = False
+        
+        elapsed_time = time.time() - start_time
+        app.logger.info(f"Cluster cache updated successfully in {elapsed_time:.2f} seconds. Total clusters: {len(merged_clusters)}")
+        
+    except Exception as e:
+        app.logger.error(f"Error updating cluster cache: {str(e)}", exc_info=True)
+        with cluster_cache['lock']:
+            cluster_cache['status'] = 'error'
+            cluster_cache['error_message'] = str(e)
+            cluster_cache['is_updating'] = False
+
+def schedule_cache_updates():
+    """Background thread to periodically update cluster cache"""
+    # Initial update
+    update_cluster_cache()
+    
+    # Schedule periodic updates
+    while True:
+        time.sleep(CACHE_REFRESH_INTERVAL)
+        app.logger.info("Running scheduled cluster cache update")
+        update_cluster_cache()
+
 # Constants for multiple environments
 PARAM_STORE_PATHS = {
     'uat1': "/application/ecdp-config/uat1/EMR-BASE/",
@@ -169,6 +252,18 @@ LAMBDA_FUNCTION_NAMES = {
 
 # S3 log bucket for all UAT environments
 S3_LOG_BUCKET = 'app-id-107923-dep-id-107924-uu-id-mpm6sfacq4a8'
+
+# Cluster cache configuration
+CACHE_REFRESH_INTERVAL = 120  # 2 minutes in seconds
+cluster_cache = {
+    'data': None,
+    'last_updated': None,
+    'next_refresh': None,
+    'is_updating': False,
+    'status': 'initializing',  # initializing, ready, updating, error
+    'error_message': None,
+    'lock': threading.Lock()
+}
 
 # Azure OpenAI Configuration - Hybrid Authentication (Service Principal + API Key)
 AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT', '')
@@ -425,9 +520,32 @@ def log_response_info(response):
 
 @app.route(f'{URL_PREFIX}/clusters', methods=['GET'])
 def get_clusters():
-    """Fetch all clusters from Parameter Store and their current states with pagination"""
+    """Fetch all clusters from cache with pagination"""
     try:
-        app.logger.debug("Fetching clusters data")
+        app.logger.debug("Fetching clusters data from cache")
+        
+        # Check cache status
+        with cluster_cache['lock']:
+            status = cluster_cache['status']
+            cache_data = cluster_cache['data']
+            next_refresh = cluster_cache['next_refresh']
+            error_message = cluster_cache['error_message']
+        
+        # If cache is not ready, return loading status
+        if status == 'initializing' or (status == 'error' and cache_data is None):
+            return jsonify({
+                'status': 'loading',
+                'message': 'Initial cluster data loading...' if status == 'initializing' else f'Error loading data: {error_message}',
+                'refreshing_in': None
+            })
+        
+        # Calculate seconds until next refresh
+        refreshing_in = None
+        if next_refresh:
+            refreshing_in = max(0, int((next_refresh - datetime.now()).total_seconds()))
+        
+        # Use cached data (even if stale during update)
+        all_clusters = cache_data.copy() if cache_data else []
         
         # Get parameters
         page = int(request.args.get('page', 1))
@@ -447,105 +565,33 @@ def get_clusters():
         if limit < 1 or limit > 100:
             limit = 20
         
-        # Get cluster configurations from Parameter Store for selected environment(s)
-        if environment == 'all':
-            cluster_configs = []
-            for env in ['uat1', 'uat2', 'uat3']:
-                configs = get_cluster_configs(env)
-                for config in configs:
-                    config['environment'] = env.upper()
-                cluster_configs.extend(configs)
-        else:
-            cluster_configs = get_cluster_configs(environment)
-            for config in cluster_configs:
-                config['environment'] = environment.upper()
-        
-        app.logger.debug(f"Retrieved {len(cluster_configs)} cluster configs")
-        
-        # Get current EMR cluster states
-        emr_clusters = list_emr_clusters()
-        app.logger.debug(f"Retrieved {len(emr_clusters)} EMR clusters")
-        
-        # Merge the data
-        merged_clusters = map_cluster_states(cluster_configs, emr_clusters)
-        app.logger.debug(f"Merged data for {len(merged_clusters)} clusters")
+        # Apply environment filter
+        if environment != 'all':
+            all_clusters = [
+                cluster for cluster in all_clusters
+                if cluster.get('environment', '').lower() == environment.lower()
+            ]
         
         # Apply search filter
         if search:
-            merged_clusters = [
-                cluster for cluster in merged_clusters
+            all_clusters = [
+                cluster for cluster in all_clusters
                 if (cluster.get('name') and search in cluster['name'].lower()) or
                    (cluster.get('clusterId') and search in cluster.get('clusterId', '').lower()) or
                    (cluster.get('state') and search in cluster.get('state', '').lower())
             ]
-            app.logger.debug(f"After search filter: {len(merged_clusters)} clusters")
         
         # Apply state filter
         if state_filter:
-            merged_clusters = [
-                cluster for cluster in merged_clusters
+            all_clusters = [
+                cluster for cluster in all_clusters
                 if cluster.get('state', 'UNKNOWN') in state_filter
             ]
-            app.logger.debug(f"After state filter: {len(merged_clusters)} clusters")
-        
-        # Sort clusters: Active states first, then by last activity
-        active_states = ['RUNNING', 'STARTING', 'BOOTSTRAPPING', 'WAITING']
-        
-        def get_sort_key(cluster):
-            state = cluster.get('state', 'UNKNOWN')
-            # Priority for active states
-            if state in active_states:
-                state_priority = active_states.index(state)
-            else:
-                state_priority = len(active_states) + 1  # Lower priority for non-active states
-            
-            # Get last activity time - use the most recent time from timeline
-            timeline = cluster.get('timeline', {})
-            last_activity = None
-            
-            # Check timeline for the most recent activity
-            if timeline:
-                # Convert timeline values to datetime if they're strings
-                times = []
-                for key, value in timeline.items():
-                    if value:
-                        try:
-                            if isinstance(value, str):
-                                # Parse ISO format datetime
-                                dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
-                                times.append(dt)
-                        except:
-                            pass
-                
-                if times:
-                    last_activity = max(times)
-            
-            # If no timeline, use lastModified from config
-            if not last_activity:
-                last_modified = cluster.get('lastModified')
-                if last_modified:
-                    try:
-                        if isinstance(last_modified, str):
-                            last_activity = datetime.fromisoformat(last_modified.replace('Z', '+00:00'))
-                    except:
-                        pass
-            
-            # Default to a very old date if no activity found
-            if not last_activity:
-                last_activity = datetime(2000, 1, 1)
-            
-            # Return tuple for sorting: (state_priority, -last_activity_timestamp)
-            # Negative timestamp so more recent comes first
-            return (state_priority, -last_activity.timestamp())
-        
-        # Sort the clusters
-        merged_clusters.sort(key=get_sort_key)
-        app.logger.debug(f"Sorted {len(merged_clusters)} clusters by state and last activity")
         
         # Apply pagination
-        total_count = len(merged_clusters)
+        total_count = len(all_clusters)
         skip = (page - 1) * limit
-        paginated_clusters = merged_clusters[skip:skip + limit]
+        paginated_clusters = all_clusters[skip:skip + limit]
         total_pages = (total_count + limit - 1) // limit
         
         return jsonify({
@@ -557,10 +603,35 @@ def get_clusters():
                 'totalPages': total_pages,
                 'hasNext': page < total_pages,
                 'hasPrev': page > 1
-            }
+            },
+            'refreshing_in': refreshing_in
         })
     except Exception as e:
         app.logger.error(f"Error in get_clusters: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+@app.route(f'{URL_PREFIX}/clusters/refresh', methods=['POST'])
+def refresh_clusters():
+    """Trigger a manual refresh of cluster cache"""
+    try:
+        # Check if update is already in progress
+        with cluster_cache['lock']:
+            if cluster_cache['is_updating']:
+                return jsonify({
+                    'status': 'already_updating',
+                    'message': 'Cache update already in progress'
+                }), 202
+        
+        # Start refresh in background thread
+        refresh_thread = threading.Thread(target=update_cluster_cache, daemon=True)
+        refresh_thread.start()
+        
+        return jsonify({
+            'status': 'refresh_started',
+            'message': 'Cluster cache refresh initiated'
+        })
+    except Exception as e:
+        app.logger.error(f"Error triggering refresh: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route(f'{URL_PREFIX}/clusters/<name>', methods=['GET'])
@@ -568,17 +639,27 @@ def get_cluster(name):
     """Get details for a specific cluster"""
     try:
         app.logger.debug(f"Fetching details for cluster: {name}")
-            
-        # Get cluster configurations
-        cluster_configs = get_cluster_configs()
-        emr_clusters = list_emr_clusters()
-        merged_clusters = map_cluster_states(cluster_configs, emr_clusters)
+        
+        # Check cache status
+        with cluster_cache['lock']:
+            cache_data = cluster_cache['data']
+            status = cluster_cache['status']
+        
+        # If cache is not ready, fallback to direct fetch (for single cluster it's OK)
+        if status != 'ready' or not cache_data:
+            app.logger.info(f"Cache not ready, fetching cluster {name} directly")
+            cluster_configs = get_cluster_configs()
+            emr_clusters = list_emr_clusters()
+            merged_clusters = map_cluster_states(cluster_configs, emr_clusters)
+        else:
+            # Use cached data
+            merged_clusters = cache_data
 
         # Find the specific cluster
         cluster = next((c for c in merged_clusters if c['name'] == name), None)
         if not cluster:
             app.logger.warning(f"Cluster not found: {name}")
-            return jsonify({"error": f"Cluster {name} not found"}), 404
+            return jsonify({"error": f"Cluster {name} not found (only showing clusters from last 5 days)"}), 404
 
         app.logger.debug(f"Successfully fetched details for cluster: {name}")
         return jsonify(cluster)
@@ -1670,6 +1751,11 @@ def map_cluster_states(cluster_configs, emr_clusters):
 
 
 if __name__ == '__main__':
+    # Start the background cache update thread
+    cache_thread = threading.Thread(target=schedule_cache_updates, daemon=True)
+    cache_thread.start()
+    app.logger.info("Started cluster cache background thread")
+    
     port = int(os.environ.get('PORT', 3700))
     
     if os.environ.get('FLASK_ENV') == 'development':
