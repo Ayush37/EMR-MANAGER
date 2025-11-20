@@ -268,10 +268,17 @@ cluster_cache = {
     'lock': threading.Lock()
 }
 
-# Start the background cache update thread
-cache_thread = threading.Thread(target=schedule_cache_updates, daemon=True)
-cache_thread.start()
-app.logger.info("Started cluster cache background thread")
+# Flag to track if cache thread has been started
+cache_thread_started = False
+
+def ensure_cache_thread_started():
+    """Ensure cache thread is started only once"""
+    global cache_thread_started
+    if not cache_thread_started:
+        cache_thread_started = True
+        cache_thread = threading.Thread(target=schedule_cache_updates, daemon=True)
+        cache_thread.start()
+        app.logger.info("Started cluster cache background thread")
 
 # Azure OpenAI Configuration - Hybrid Authentication (Service Principal + API Key)
 AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT', '')
@@ -530,6 +537,9 @@ def log_response_info(response):
 def get_clusters():
     """Fetch all clusters from cache with pagination"""
     try:
+        # Ensure cache thread is started on first request
+        ensure_cache_thread_started()
+        
         app.logger.debug("Fetching clusters data from cache")
         
         # Check cache status
@@ -1770,6 +1780,9 @@ def map_cluster_states(cluster_configs, emr_clusters):
 
 
 if __name__ == '__main__':
+    # Start cache thread when running directly
+    ensure_cache_thread_started()
+    
     port = int(os.environ.get('PORT', 3700))
     
     if os.environ.get('FLASK_ENV') == 'development':
