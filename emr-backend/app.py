@@ -172,6 +172,9 @@ def update_cluster_cache():
         all_configs = []
         for env in ['uat1', 'uat2', 'uat3']:
             configs = get_cluster_configs(env)
+            # Add environment to each config
+            for config in configs:
+                config['environment'] = env.upper()
             all_configs.extend(configs)
         
         # Fetch all EMR clusters
@@ -531,9 +534,18 @@ def get_clusters():
             next_refresh = cluster_cache['next_refresh']
             error_message = cluster_cache['error_message']
         
-        # If cache is not ready, return loading status
+        # If cache is not ready, return empty data with loading status
         if status == 'initializing' or (status == 'error' and cache_data is None):
             return jsonify({
+                'clusters': [],
+                'pagination': {
+                    'page': 1,
+                    'limit': 20,
+                    'total': 0,
+                    'totalPages': 0,
+                    'hasNext': False,
+                    'hasPrev': False
+                },
                 'status': 'loading',
                 'message': 'Initial cluster data loading...' if status == 'initializing' else f'Error loading data: {error_message}',
                 'refreshing_in': None
