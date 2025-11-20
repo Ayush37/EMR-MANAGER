@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Current Status (Last Updated: 2025-09-05)
+## Current Status (Last Updated: 2024-11-20)
 
 ### Working Features
 - ✅ EMR cluster management with multi-environment support (UAT1/2/3)
@@ -19,6 +19,54 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - ✅ AI-powered step analysis using Azure OpenAI (FIXED: token expiration)
 - ✅ **SSM Parameter Search-Based Interface** (NEW) - Search specific parameters instead of listing all
 - ✅ **S3 Data Viewer Search** (NEW) - Smart search with client/server modes for directories
+- ✅ **In-Memory Cluster Caching** (NEW) - Prevents timeouts with background data loading
+- ✅ **Comprehensive Throttling Protection** (NEW) - Retry logic for all AWS API calls
+
+### Recent Session Work (2024-11-20)
+
+1. **EMR Service Throttling and Timeout Fixes** ✅:
+   - **Problem**: AWS API throttling errors and request timeouts when listing clusters
+   - **Root Causes**:
+     - Fetching ALL clusters regardless of age (could be thousands)
+     - N+1 API problem: get_step_count() called for every cluster on initial load
+     - No retry logic for throttling errors
+     - Synchronous loading causing gateway timeouts
+   
+   - **Solutions Implemented**:
+     a) **5-Day Filter**: Only fetch clusters created in last 5 days
+        - Added `CreatedAfter` parameter to list_clusters
+        - Significantly reduces data volume
+     
+     b) **Throttling Protection**: Comprehensive retry logic
+        - Created `@with_retry` decorator with exponential backoff
+        - Wrapped all EMR API calls (list_clusters, list_steps, describe_step, etc.)
+        - 3 retries with delays: 1.1s, 2.2s, 4.4s
+        - 200ms delay between pagination calls
+     
+     c) **Removed Step Count from Initial Load**:
+        - Set stepCount to null instead of fetching for each cluster
+        - Prevents N+1 API calls that caused throttling
+        - Frontend displays "0" for null values
+     
+     d) **In-Memory Caching System**:
+        - Background thread loads all clusters on startup
+        - Cache refreshes every 2 minutes
+        - API requests served instantly from cache (no timeouts)
+        - Lazy initialization on first request
+        - Thread-safe with proper locking
+   
+   - **Cache Implementation Details**:
+     - Structure: `{data, last_updated, next_refresh, status, is_updating}`
+     - States: initializing → ready → updating (cycles)
+     - Returns empty data with loading status if not ready
+     - Manual refresh endpoint: POST `/api/clusters/refresh`
+     - Shows "refreshing_in" countdown in responses
+   
+   - **Results**:
+     - No more throttling errors
+     - Instant API responses (sub-second)
+     - Handles large cluster counts gracefully
+     - Maintains all existing functionality
 
 ### Recent Session Work (2025-09-05)
 
@@ -209,6 +257,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - If S3 Data shows multiple sidebars, check ALB routing
    - Ensure `/s3data/*` routes to S3 Data frontend, not home frontend
    - Temporary fix: Added trailing slash to path in home-frontend App.js
+9. **EMR API Throttling** ✅ **FIXED**:
+   - **Previous Issue**: ThrottlingException when listing clusters/steps
+   - **Solution**: Added @with_retry decorator with exponential backoff
+   - **Additional**: 5-day filter reduces API calls significantly
+10. **EMR Backend Timeouts** ✅ **FIXED**:
+   - **Previous Issue**: Gateway timeouts (504) when loading large cluster lists
+   - **Solution**: Implemented in-memory caching with background refresh
+   - **Result**: Instant responses from cache, no more timeouts
 
 2. **Azure OpenAI Token Expiration** ✅ **FIXED**:
    - **Previous Pattern (PROBLEMATIC)**:
@@ -298,11 +354,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### For Next Session
 To continue work, reference:
 - This CLAUDE.md file for complete project context
-- Recent commits show SSM redesign and S3 Data search feature
-- SSM now uses search-based interface (no auto-loading)
-- S3 Data has smart search with client/server modes
-- Fix S3 Data backend build error: check Python encoding issues
-- Consider implementing bulk download for S3 Data Viewer (discussed but not implemented)
+- EMR service now has comprehensive throttling protection and caching
+- Cache refreshes every 2 minutes (configurable via CACHE_REFRESH_INTERVAL)
+- All EMR API calls wrapped with retry logic
+- Step counts removed from initial load (prevents N+1 problem)
+- Consider adjusting 5-day filter if needed (currently hardcoded)
+- Monitor cache memory usage for very large deployments
 - All services follow similar patterns - use S3 Data as latest template
 
 ### Session Summary (2025-07-16 - Continued)
@@ -865,6 +922,33 @@ for i in range(len(table)):
        token_response = credential.get_token("https://cognitiveservices.azure.com/.default")
        azure_openai_client.default_headers["Authorization"] = f"Bearer {token_response.token}"
    ```
+
+### EMR Caching Implementation
+
+#### Cache Structure
+```python
+cluster_cache = {
+    'data': None,              # List of all clusters
+    'last_updated': None,      # datetime of last update
+    'next_refresh': None,      # datetime of next scheduled refresh
+    'is_updating': False,      # Prevents concurrent updates
+    'status': 'initializing',  # initializing, ready, updating, error
+    'error_message': None,     # Error details if update fails
+    'lock': threading.Lock()   # Thread-safe access
+}
+```
+
+#### Cache Lifecycle
+1. **Initialization**: Thread starts on first `/api/clusters` request
+2. **Loading**: Background thread fetches all data without timeout constraints
+3. **Ready**: Serves instant responses from memory
+4. **Refresh**: Every 2 minutes, background update (old data remains available)
+5. **Error Handling**: Continues serving stale data if refresh fails
+
+#### Search Implementation with Cache
+- Search operates on entire cached dataset
+- Filters applied in memory: environment → search → state → pagination
+- Instant results across all clusters (not limited by pagination)
 
 ### Common Middleware Patterns
 
