@@ -536,6 +536,7 @@ def get_clusters():
         
         # If cache is not ready, return empty data with loading status
         if status == 'initializing' or (status == 'error' and cache_data is None):
+            app.logger.warning(f"Cache not ready - Status: {status}, Message: {error_message if status == 'error' else 'Initial load in progress'}")
             return jsonify({
                 'clusters': [],
                 'pagination': {
@@ -558,6 +559,7 @@ def get_clusters():
         
         # Use cached data (even if stale during update)
         all_clusters = cache_data.copy() if cache_data else []
+        app.logger.info(f"Serving {len(all_clusters)} clusters from cache (Status: {status}, Next refresh in: {refreshing_in}s)")
         
         # Get parameters
         page = int(request.args.get('page', 1))
