@@ -2,7 +2,8 @@
 import os
 import json
 import logging
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
@@ -1492,20 +1493,41 @@ def list_emr_clusters():
     states = ["STARTING", "BOOTSTRAPPING", "RUNNING", "WAITING", "TERMINATING", "TERMINATED", "TERMINATED_WITH_ERRORS"]
     all_clusters = []
     
+    # Calculate date 5 days ago
+    five_days_ago = datetime.now() - timedelta(days=5)
+    app.logger.info(f"Filtering clusters created after: {five_days_ago.isoformat()}")
+    
     try:
         marker = None
         page_count = 0
+        retry_count = 0
+        max_retries = 3
         
         while True:
             page_count += 1
             app.logger.debug(f"Fetching EMR clusters page {page_count}")
             
             # Build request parameters
-            params = {'ClusterStates': states}
+            params = {
+                'ClusterStates': states,
+                'CreatedAfter': five_days_ago  # Only get clusters from last 5 days
+            }
             if marker:
                 params['Marker'] = marker
             
-            response = emr.list_clusters(**params)
+            try:
+                response = emr.list_clusters(**params)
+                retry_count = 0  # Reset retry count on success
+            except Exception as e:
+                if 'ThrottlingException' in str(e) and retry_count < max_retries:
+                    retry_count += 1
+                    wait_time = (2 ** retry_count) + (0.1 * (2 ** retry_count))  # Exponential backoff
+                    app.logger.warning(f"Throttling detected, waiting {wait_time}s before retry {retry_count}/{max_retries}")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise
+            
             clusters = response.get('Clusters', [])
             all_clusters.extend(clusters)
             
@@ -1519,6 +1541,9 @@ def list_emr_clusters():
             marker = response.get('Marker')
             if not marker:
                 break
+            
+            # Add small delay between API calls to avoid throttling
+            time.sleep(0.2)  # 200ms delay between pagination calls
                 
         app.logger.debug(f"Total EMR clusters found: {len(all_clusters)}")
         return all_clusters
