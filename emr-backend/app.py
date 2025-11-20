@@ -1639,11 +1639,9 @@ def map_cluster_states(cluster_configs, emr_clusters):
         else:
             app.logger.debug(f"No matching EMR cluster found for: {config['name']}")
 
-        # Get step count if we have a cluster ID
-        step_count = 0
-        if matching_cluster and matching_cluster.get('Id'):
-            step_count = get_step_count(matching_cluster['Id'])
-            app.logger.debug(f"Cluster {config['name']} has {step_count} steps")
+        # Skip getting step count during initial listing to avoid throttling
+        # Step count can be fetched when user clicks on specific cluster
+        step_count = None  # Will be loaded on demand
 
         # For serialization, ensure all datetime objects are converted to strings
         timeline = None
