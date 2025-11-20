@@ -15,6 +15,7 @@ import re
 from io import BytesIO
 from azure.identity import CertificateCredential
 from openai import AzureOpenAI
+from functools import wraps
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -97,6 +98,61 @@ except Exception as e:
     emr = None
     lambda_client = None
     s3 = None
+
+# Retry decorator for AWS API calls with throttling protection
+def with_retry(max_retries=3, delay_base=0.5):
+    """Decorator to retry AWS API calls with exponential backoff for throttling"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            retry_count = 0
+            last_exception = None
+            
+            while retry_count <= max_retries:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    if 'ThrottlingException' in str(e) or 'Rate exceeded' in str(e):
+                        if retry_count < max_retries:
+                            retry_count += 1
+                            wait_time = delay_base * (2 ** retry_count) + (0.1 * (2 ** retry_count))
+                            app.logger.warning(f"{func.__name__}: Throttling detected, waiting {wait_time:.2f}s before retry {retry_count}/{max_retries}")
+                            time.sleep(wait_time)
+                            continue
+                    # For non-throttling exceptions or max retries reached
+                    last_exception = e
+                    break
+            
+            # If we get here, either max retries exceeded or non-throttling error
+            raise last_exception
+        return wrapper
+    return decorator
+
+# Wrapper functions for EMR API calls with retry logic
+@with_retry(max_retries=3, delay_base=0.5)
+def emr_list_clusters(**kwargs):
+    """List EMR clusters with retry logic for throttling"""
+    return emr.list_clusters(**kwargs)
+
+@with_retry(max_retries=3, delay_base=0.5)
+def emr_list_steps(**kwargs):
+    """List EMR steps with retry logic for throttling"""
+    return emr.list_steps(**kwargs)
+
+@with_retry(max_retries=3, delay_base=0.5)
+def emr_describe_step(**kwargs):
+    """Describe EMR step with retry logic for throttling"""
+    return emr.describe_step(**kwargs)
+
+@with_retry(max_retries=3, delay_base=0.5)
+def emr_add_job_flow_steps(**kwargs):
+    """Add job flow steps with retry logic for throttling"""
+    return emr.add_job_flow_steps(**kwargs)
+
+@with_retry(max_retries=3, delay_base=0.5)
+def emr_cancel_steps(**kwargs):
+    """Cancel EMR steps with retry logic for throttling"""
+    return emr.cancel_steps(**kwargs)
 
 # Constants for multiple environments
 PARAM_STORE_PATHS = {
@@ -634,7 +690,7 @@ def get_cluster_steps(cluster_id):
             if marker:
                 kwargs['Marker'] = marker
                 
-            response = emr.list_steps(**kwargs)
+            response = emr_list_steps(**kwargs)
             steps = response.get('Steps', [])
             all_steps.extend(steps)
             
@@ -646,7 +702,7 @@ def get_cluster_steps(cluster_id):
         detailed_steps = []
         for step in all_steps:
             try:
-                step_detail = emr.describe_step(
+                step_detail = emr_describe_step(
                     ClusterId=cluster_id,
                     StepId=step['Id']
                 )['Step']
@@ -697,7 +753,7 @@ def get_step_details(cluster_id, step_id):
     try:
         app.logger.debug(f"Fetching step details for step {step_id} in cluster {cluster_id}")
         
-        response = emr.describe_step(
+        response = emr_describe_step(
             ClusterId=cluster_id,
             StepId=step_id
         )
@@ -743,7 +799,7 @@ def add_step(cluster_id):
         }
         
         # Add the step to the cluster
-        response = emr.add_job_flow_steps(
+        response = emr_add_job_flow_steps(
             JobFlowId=cluster_id,
             Steps=[step_config]
         )
@@ -767,7 +823,7 @@ def cancel_step(cluster_id, step_id):
         app.logger.debug(f"Cancelling step {step_id} in cluster {cluster_id}")
         
         # First check if the step is in a cancellable state
-        step_response = emr.describe_step(
+        step_response = emr_describe_step(
             ClusterId=cluster_id,
             StepId=step_id
         )
@@ -779,7 +835,7 @@ def cancel_step(cluster_id, step_id):
             }), 400
         
         # Cancel the step
-        response = emr.cancel_steps(
+        response = emr_cancel_steps(
             ClusterId=cluster_id,
             StepIds=[step_id]
         )
@@ -1102,7 +1158,7 @@ def analyze_step(cluster_id, step_id):
         
         # Get step details first
         try:
-            response = emr.describe_step(ClusterId=cluster_id, StepId=step_id)
+            response = emr_describe_step(ClusterId=cluster_id, StepId=step_id)
             step = response['Step']
             step_state = step['Status']['State']
             step_name = step.get('Name', 'Unknown')
@@ -1500,8 +1556,6 @@ def list_emr_clusters():
     try:
         marker = None
         page_count = 0
-        retry_count = 0
-        max_retries = 3
         
         while True:
             page_count += 1
@@ -1515,18 +1569,7 @@ def list_emr_clusters():
             if marker:
                 params['Marker'] = marker
             
-            try:
-                response = emr.list_clusters(**params)
-                retry_count = 0  # Reset retry count on success
-            except Exception as e:
-                if 'ThrottlingException' in str(e) and retry_count < max_retries:
-                    retry_count += 1
-                    wait_time = (2 ** retry_count) + (0.1 * (2 ** retry_count))  # Exponential backoff
-                    app.logger.warning(f"Throttling detected, waiting {wait_time}s before retry {retry_count}/{max_retries}")
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    raise
+            response = emr_list_clusters(**params)
             
             clusters = response.get('Clusters', [])
             all_clusters.extend(clusters)
@@ -1554,9 +1597,6 @@ def list_emr_clusters():
 def get_step_count(cluster_id):
     """Get the total number of steps for a cluster"""
     try:
-        # Only get the first page with limit=1 to get the total count
-        response = emr.list_steps(ClusterId=cluster_id, MaxResults=1)
-        
         # AWS doesn't provide a direct total count, so we need to iterate
         total_count = 0
         marker = None
@@ -1566,7 +1606,7 @@ def get_step_count(cluster_id):
             if marker:
                 kwargs['Marker'] = marker
             
-            response = emr.list_steps(**kwargs)
+            response = emr_list_steps(**kwargs)
             steps = response.get('Steps', [])
             total_count += len(steps)
             
