@@ -268,6 +268,11 @@ cluster_cache = {
     'lock': threading.Lock()
 }
 
+# Start the background cache update thread
+cache_thread = threading.Thread(target=schedule_cache_updates, daemon=True)
+cache_thread.start()
+app.logger.info("Started cluster cache background thread")
+
 # Azure OpenAI Configuration - Hybrid Authentication (Service Principal + API Key)
 AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT', '')
 AZURE_OPENAI_API_KEY = os.getenv('AZURE_OPENAI_API_KEY', '')  # OpenAI API Key
@@ -1765,11 +1770,6 @@ def map_cluster_states(cluster_configs, emr_clusters):
 
 
 if __name__ == '__main__':
-    # Start the background cache update thread
-    cache_thread = threading.Thread(target=schedule_cache_updates, daemon=True)
-    cache_thread.start()
-    app.logger.info("Started cluster cache background thread")
-    
     port = int(os.environ.get('PORT', 3700))
     
     if os.environ.get('FLASK_ENV') == 'development':
