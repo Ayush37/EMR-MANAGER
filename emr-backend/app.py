@@ -808,32 +808,23 @@ def get_cluster_steps(cluster_id):
             if not marker:
                 break
         
-        # Get detailed information for each step
+        # Use basic step information from list_steps (no describe calls)
+        app.logger.info(f"Processing {len(all_steps)} steps without describe API calls")
         detailed_steps = []
         for step in all_steps:
-            try:
-                step_detail = emr_describe_step(
-                    ClusterId=cluster_id,
-                    StepId=step['Id']
-                )['Step']
-                detailed_steps.append({
-                    'id': step_detail['Id'],
-                    'name': step_detail['Name'],
-                    'state': step_detail['Status']['State'],
-                    'creationDateTime': step_detail['Status']['Timeline'].get('CreationDateTime', '').isoformat() if hasattr(step_detail['Status']['Timeline'].get('CreationDateTime', ''), 'isoformat') else '',
-                    'startDateTime': step_detail['Status']['Timeline'].get('StartDateTime', '').isoformat() if hasattr(step_detail['Status']['Timeline'].get('StartDateTime', ''), 'isoformat') else '',
-                    'endDateTime': step_detail['Status']['Timeline'].get('EndDateTime', '').isoformat() if hasattr(step_detail['Status']['Timeline'].get('EndDateTime', ''), 'isoformat') else '',
-                    'actionOnFailure': step_detail.get('ActionOnFailure', ''),
-                    'config': step_detail.get('Config', {})
-                })
-            except Exception as e:
-                app.logger.error(f"Error getting step details for {step['Id']}: {str(e)}")
-                detailed_steps.append({
-                    'id': step['Id'],
-                    'name': step['Name'],
-                    'state': step['Status']['State'],
-                    'error': 'Failed to get details'
-                })
+            # Extract timeline info if available from Status
+            timeline = step.get('Status', {}).get('Timeline', {})
+            
+            detailed_steps.append({
+                'id': step['Id'],
+                'name': step['Name'],
+                'state': step['Status']['State'],
+                'creationDateTime': timeline.get('CreationDateTime', '').isoformat() if hasattr(timeline.get('CreationDateTime', ''), 'isoformat') else '',
+                'startDateTime': timeline.get('StartDateTime', '').isoformat() if hasattr(timeline.get('StartDateTime', ''), 'isoformat') else '',
+                'endDateTime': timeline.get('EndDateTime', '').isoformat() if hasattr(timeline.get('EndDateTime', ''), 'isoformat') else '',
+                'actionOnFailure': step.get('ActionOnFailure', ''),  # Check if available
+                'config': step.get('Config', {})  # Check if Config is available
+            })
         
         # Apply pagination
         total_count = len(detailed_steps)
